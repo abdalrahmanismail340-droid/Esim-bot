@@ -326,6 +326,7 @@ async def credit_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 credit_conv = ConversationHandler(
+    per_message=False,
     entry_points=[
         CommandHandler("credit", credit_start),
         MessageHandler(filters.Regex(f"^{re.escape(config.ADMIN_CREDIT)}$"), credit_start),
@@ -529,6 +530,7 @@ async def broadcast_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 broadcast_conv = ConversationHandler(
+    per_message=False,
     entry_points=[
         CommandHandler("broadcast", broadcast_start),
         MessageHandler(filters.Regex(f"^{re.escape(config.ADMIN_BROADCAST)}$"), broadcast_start),
@@ -606,6 +608,7 @@ async def generic_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 maint_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(maint_msg_start, pattern=r"^adm:maintmsg$")],
     states={MAINT_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, maint_msg_save)]},
     fallbacks=[CommandHandler("cancel", generic_cancel),
@@ -640,6 +643,7 @@ async def note_msg_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 note_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(note_msg_start, pattern=r"^adm:notemsg$")],
     states={NOTE_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, note_msg_save)]},
     fallbacks=[CommandHandler("cancel", generic_cancel),
@@ -838,6 +842,7 @@ async def staff_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 staff_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(staff_add_start, pattern=r"^adm:staffadd$")],
     states={
         STAFF_ASK_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, staff_add_id)],
@@ -1026,12 +1031,14 @@ async def refund_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 refund_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(refund_approve_start, pattern=r"^adm:refundapp:\d+$")],
     states={REFUND_TXID: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_txid_save)]},
     fallbacks=[CommandHandler("cancel", refund_cancel)],
 )
 
 refund_reject_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(refund_reject_start, pattern=r"^adm:refundrec:\d+$")],
     states={REFUND_NOTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_note_save)]},
     fallbacks=[CommandHandler("cancel", refund_cancel)],

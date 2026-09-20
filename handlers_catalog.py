@@ -606,6 +606,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------- conversations
 
 addcountry_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(addcountry_start, pattern=r"^cat:addcountry$")],
     states={
         ASK_C_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, addcountry_name)],
@@ -616,6 +617,7 @@ addcountry_conv = ConversationHandler(
 )
 
 editcountry_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(cedit_start, pattern=r"^cat:cedit:\d+$")],
     states={
         ASK_CE_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, cedit_name)],
@@ -626,6 +628,7 @@ editcountry_conv = ConversationHandler(
 )
 
 addplan_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(addplan_start, pattern=r"^cat:addplan:\d+$")],
     states={
         ASK_P_DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, addplan_data)],
@@ -640,6 +643,7 @@ addplan_conv = ConversationHandler(
 )
 
 editplan_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(edit_field_start, pattern=r"^cat:edit:\d+:\w+$")],
     states={ASK_FIELD_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_field_save)]},
     fallbacks=[CommandHandler("cancel", cancel),
@@ -647,6 +651,7 @@ editplan_conv = ConversationHandler(
 )
 
 tier_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(tier_add_start, pattern=r"^cat:tieradd:\d+$")],
     states={
         ASK_TIER_QTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, tier_qty)],

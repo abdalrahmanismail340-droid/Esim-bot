@@ -297,6 +297,7 @@ async def qty_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 qty_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(qty_start, pattern=r"^u:qty:\d+$")],
     states={ASK_QTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, qty_save)]},
     fallbacks=[CommandHandler("cancel", qty_cancel),
@@ -791,6 +792,7 @@ async def refund_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 refund_conv = ConversationHandler(
+    per_message=False,
     entry_points=[
         CallbackQueryHandler(refund_start, pattern=r"^u:refund$"),
         MessageHandler(filters.Regex(f"^{re.escape(config.MENU_BALANCE)}$"), refund_start),
@@ -805,6 +807,7 @@ refund_conv = ConversationHandler(
 )
 
 claim_conv = ConversationHandler(
+    per_message=False,
     entry_points=[CallbackQueryHandler(claim_start, pattern=r"^u:wc:\d+$")],
     states={CLAIM_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, claim_save)]},
     fallbacks=[CommandHandler("cancel", claim_cancel),

@@ -427,6 +427,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 addstock_conv = ConversationHandler(
+    per_message=False,
     entry_points=[
         MessageHandler(filters.Regex(f"^{re.escape(config.ADMIN_ADD_STOCK)}$"), add_start),
         CallbackQueryHandler(add_start, pattern=r"^stk:addnew$"),

@@ -210,6 +210,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 search_conv = ConversationHandler(
+    per_message=False,
     entry_points=[
         CommandHandler("search", start),
         MessageHandler(filters.Regex(f"^{re.escape(config.ADMIN_SEARCH)}$"), start),
