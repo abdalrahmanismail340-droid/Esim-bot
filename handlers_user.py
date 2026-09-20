@@ -26,7 +26,6 @@ import config
 import db
 import permissions as perms
 import ui
-from binance_verify import get_transaction_by_id
 from ocrspace_verify import extract_tx_ids_from_image
 
 log = logging.getLogger(__name__)
