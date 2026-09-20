@@ -73,6 +73,13 @@ async def text_message(update, context):
     user_id = update.effective_user.id
     text = update.message.text
 
+    # Only consume free text for top-up when the user is actually waiting for
+    # a transaction ID. A broad topup_text MessageHandler registered before
+    # this function would swallow every admin reply-keyboard button silently.
+    if context.user_data.get(handlers_user.AWAITING_TOPUP_TX):
+        await handlers_user.topup_text(update, context)
+        return
+
     # Refunds button from admin keyboard
     if text == "💳 طلبات الاسترجاع":
         if perms.is_staff(user_id) and perms.can(user_id, perms.P_WALLET):
@@ -136,8 +143,8 @@ def main():
     app.add_handler(handlers_user.claim_conv)
     app.add_handler(handlers_user.refund_conv)
     
-    # User side: top-up (text/photo handlers, not ConversationHandler)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers_user.topup_text))
+    # User side: top-up photo handler. Text top-ups are routed by text_message
+    # only while AWAITING_TOPUP_TX is set, so admin buttons remain reachable.
     app.add_handler(MessageHandler(filters.PHOTO, handlers_user.topup_photo))
     
     # User side: callbacks
