@@ -1,133 +1,170 @@
 """
-Entry point. Wires every module together and starts polling.
-
-/admin swaps the bottom keyboard to the admin panel, so every section is one
-tap away at the bottom of the chat. '🔙 رجوع لقائمة المتجر' swaps it back.
-
-Handler order matters: conversations are registered first so their entry points
-win over the generic callback routers, and the free-text catch-all is last.
+The main bot entry point. Sets up the Telegram dispatcher with all the handlers
+(commands, messages, button clicks) that route to the customer and admin logic.
 """
 
 import logging
 import re
+import sys
 
-from telegram import BotCommand, Update
 from telegram.ext import (
     Application,
-    CallbackQueryHandler,
     CommandHandler,
-    ContextTypes,
+    CallbackQueryHandler,
     MessageHandler,
     filters,
 )
 
 import config
 import db
-import handlers_admin as adm
-import handlers_catalog as cat
-import handlers_reports as rep
-import handlers_search as srch
-import handlers_stock as stk
-import handlers_user as usr
+import handlers_admin
+import handlers_search
+import handlers_user
+import permissions as perms
 import ui
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    level=logging.INFO,
+    format="%(asctime)s — %(name)s — %(levelname)s — %(message)s",
 )
-logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 
-def menu(label):
-    return filters.Regex(f"^{re.escape(label)}$")
+async def start(update, context):
+    """The /start command."""
+    user = update.effective_user
+    db.ensure_user(user.id, user.username, user.first_name)
+    text = (
+        f"👋 أهلاً {user.first_name or 'عميلنا'}!\n\n"
+        "🛒 في متجر خدمات eSIM دولية بأسعار تنافسية.\n"
+        "📲 اختر الباقة اللي تناسبك واحصل على شريحة فورًا.\n\n"
+        "💡 <i>الشرائح مرسلة عبر بيانات، بدون بطاقة SIM فيزيائية.</i>\n\n"
+        f"{db.get_delivery_note()}"
+    )
+    await update.message.reply_text(text, reply_markup=ui.main_menu_keyboard(user.id),
+                                    parse_mode="HTML")
 
 
-async def noop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
+async def admin_panel(update, context):
+    """The /admin command."""
+    if not perms.is_staff(update.effective_user.id):
+        return
+    await handlers_admin.panel(update, context)
 
 
-async def on_error(update, context):
-    log.error("handler error", exc_info=context.error)
+async def help_cmd(update, context):
+    """The /help command."""
+    text = (
+        "❓ <b>الأسئلة الشائعة</b>\n\n"
+        "❓ كيف أشتري شريحة eSIM؟\n"
+        "اضغط على 🛒 المتجر، اختر الباقة، وادفع برصيدك.\n\n"
+        "❓ كيف أشحن رصيدي؟\n"
+        "اضغط على 💳 شحن وفي خيارات الدفع المتاحة.\n\n"
+        "❓ الشريحة ماوصلتش؟\n"
+        "ممكن يكون فيه تأخير قليل، لو استنيت ساعة ولم تصل كلم الدعم.\n\n"
+        f"📞 <b>الدعم</b>\n{config.SUPPORT_CONTACT}"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
 
 
-async def post_init(app: Application):
-    await app.bot.set_my_commands([
-        BotCommand("start", "ابدأ من الأول"),
-        BotCommand("help", "ازاي تشتري"),
-        BotCommand("admin", "لوحة التحكم (للأدمن)"),
-        BotCommand("search", "بحث (للأدمن)"),
-        BotCommand("cancel", "إلغاء العملية الحالية"),
-    ])
+async def text_message(update, context):
+    """Catch-all for text messages outside of conversations.
+    Routes to admin panel or shows error."""
+    user_id = update.effective_user.id
+    text = update.message.text
+
+    # Refunds button from admin keyboard
+    if text == "💳 طلبات الاسترجاع":
+        if perms.is_staff(user_id) and perms.can(user_id, perms.P_WALLET):
+            await handlers_admin.refunds_panel(update, context)
+        else:
+            await update.message.reply_text("⛔ الصلاحية دي مش معاك.")
+        return
+
+    # Back to shop button
+    if text == "🔙 رجوع لقائمة المتجر":
+        await handlers_admin.back_to_shop(update, context)
+        return
+
+    # Admin keyboard buttons for various panels
+    if perms.is_staff(user_id):
+        patterns = [
+            (config.ADMIN_CATALOG, handlers_admin.catalog_panel),
+            (config.ADMIN_TIERS, handlers_admin.pricing_panel),
+            (config.ADMIN_STOCK, handlers_admin.stock_panel),
+            (config.ADMIN_SEARCH, handlers_search.search_start),
+            (config.ADMIN_CUSTOMERS, handlers_admin.customers),
+            (config.ADMIN_REPORTS, handlers_admin.reports_panel),
+            (config.ADMIN_INVENTORY, handlers_admin.inventory_panel),
+            (config.ADMIN_CREDIT, handlers_admin.credit_start),
+            (config.ADMIN_WARRANTY, handlers_admin.claims_panel),
+            (config.ADMIN_BROADCAST, handlers_admin.broadcast_start),
+            (config.ADMIN_SETTINGS, handlers_admin.settings_panel),
+        ]
+        for pattern, handler in patterns:
+            if pattern and text == pattern:
+                await handler(update, context)
+                return
+
+    # Not recognized
+    if not perms.is_staff(user_id):
+        await update.message.reply_text("❌ ماتعرفتش الأمر ده. استخدم القائمة 👆",
+                                       reply_markup=ui.main_menu_keyboard(user_id))
+
+
+async def error_handler(update, context):
+    """Logs errors caused by updates."""
+    log.error("Exception while handling an update:", exc_info=context.error)
 
 
 def main():
-    db.init_db()
-    app = Application.builder().token(config.BOT_TOKEN).post_init(post_init).build()
+    """Run the bot."""
+    app = Application.builder().token(config.BOT_TOKEN).build()
 
-    # ---- conversations first (their entry points must beat the routers) ----
-    app.add_handler(cat.addcountry_conv)
-    app.add_handler(cat.editcountry_conv)
-    app.add_handler(cat.addplan_conv)
-    app.add_handler(cat.editplan_conv)
-    app.add_handler(cat.tier_conv)
-    app.add_handler(stk.addstock_conv)
-    app.add_handler(srch.search_conv)
-    app.add_handler(adm.credit_conv)
-    app.add_handler(adm.broadcast_conv)
-    app.add_handler(adm.maint_conv)
-    app.add_handler(adm.note_conv)
-    app.add_handler(adm.refund_conv)
-    app.add_handler(adm.refund_reject_conv)
-    app.add_handler(adm.staff_conv)
-    app.add_handler(usr.claim_conv)
-    app.add_handler(usr.qty_conv)
-    app.add_handler(usr.refund_conv)
+    # Command handlers
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("admin", admin_panel))
 
-    # ---- commands ----
-    app.add_handler(CommandHandler("start", usr.start))
-    app.add_handler(CommandHandler("help", usr.help_cmd))
-    app.add_handler(CommandHandler("admin", adm.panel))
+    # Search
+    app.add_handler(handlers_search.search_conv)
+    app.add_handler(CallbackQueryHandler(handlers_search.callbacks, pattern=r"^srch:"))
 
-    # ---- bottom keyboard ----
-    app.add_handler(MessageHandler(menu(config.MENU_BROWSE), usr.browse))
-    app.add_handler(MessageHandler(menu(config.MENU_TOPUP), usr.topup))
-    app.add_handler(MessageHandler(menu(config.MENU_MY_ESIMS), usr.my_esims))
-    app.add_handler(MessageHandler(menu(config.MENU_BALANCE), usr.wallet))
-    app.add_handler(MessageHandler(menu(config.MENU_SUPPORT), usr.support))
-    app.add_handler(MessageHandler(menu(config.MENU_HELP), usr.help_cmd))
-    app.add_handler(MessageHandler(menu(config.MENU_ADMIN), adm.panel))
+    # User side: customers
+    app.add_handler(handlers_user.browse_conv)
+    app.add_handler(handlers_user.topup_conv)
+    app.add_handler(handlers_user.refund_conv)
+    app.add_handler(handlers_user.warranty_conv)
+    app.add_handler(CallbackQueryHandler(handlers_user.callbacks, pattern=r"^usr:"))
 
-    # ---- admin panel keys (the bottom keyboard after /admin) ----
-    app.add_handler(MessageHandler(menu(config.ADMIN_CATALOG), cat.panel))
-    app.add_handler(MessageHandler(menu(config.ADMIN_TIERS), cat.tier_pick_product))
-    app.add_handler(MessageHandler(menu(config.ADMIN_STOCK), stk.panel))
-    app.add_handler(MessageHandler(menu(config.ADMIN_CUSTOMERS), adm.customers))
-    app.add_handler(MessageHandler(menu(config.ADMIN_REPORTS), rep.panel))
-    app.add_handler(MessageHandler(menu(config.ADMIN_INVENTORY), rep.inventory_report))
-    app.add_handler(MessageHandler(menu(config.ADMIN_WARRANTY), adm.claims_panel))
-    app.add_handler(MessageHandler(menu(config.ADMIN_SETTINGS), adm.settings_panel))
-    app.add_handler(MessageHandler(menu(config.ADMIN_STAFF), adm.staff_panel))
-    if hasattr(config, 'ADMIN_BACK'): app.add_handler(MessageHandler(menu(config.ADMIN_BACK), adm.back_to_shop))
+    # Admin: panels and actions
+    app.add_handler(handlers_admin.credit_conv)
+    app.add_handler(handlers_admin.broadcast_conv)
+    app.add_handler(handlers_admin.maint_conv)
+    app.add_handler(handlers_admin.note_conv)
+    app.add_handler(handlers_admin.staff_conv)
+    
+    # Admin: refunds
+    app.add_handler(handlers_admin.refund_conv)
+    app.add_handler(handlers_admin.refund_reject_conv)
+    
+    # Admin: warranty claims
+    app.add_handler(CallbackQueryHandler(handlers_admin.callbacks, pattern=r"^adm:"))
 
-    # ---- callback routers ----
-    app.add_handler(CallbackQueryHandler(noop, pattern=r"^noop$"))
-    app.add_handler(CallbackQueryHandler(usr.callbacks, pattern=r"^u:"))
-    app.add_handler(CallbackQueryHandler(cat.callbacks, pattern=r"^cat:"))
-    app.add_handler(CallbackQueryHandler(stk.callbacks, pattern=r"^stk:"))
-    app.add_handler(CallbackQueryHandler(srch.callbacks, pattern=r"^srch:"))
-    app.add_handler(CallbackQueryHandler(rep.callbacks, pattern=r"^rep:"))
-    app.add_handler(CallbackQueryHandler(adm.callbacks, pattern=r"^adm:"))
+    # Generic text message handler (catch menu buttons, fallback)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message))
 
-    # ---- free text / photos (top-up flow) ----
-    app.add_handler(MessageHandler(filters.PHOTO, usr.topup_photo))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, usr.topup_text))
+    # Error handler
+    app.add_error_handler(error_handler)
 
-    app.add_error_handler(on_error)
-
-    log.info("owners: %s", sorted(config.OWNER_IDS) or "⚠️ مفيش! حط ADMIN_IDS في .env")
-    log.info("bot starting...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Start polling
+    log.info("Bot started, polling...")
+    app.run_polling(allowed_updates=["message", "callback_query"])
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        log.info("Bot stopped by user.")
+        sys.exit(0)

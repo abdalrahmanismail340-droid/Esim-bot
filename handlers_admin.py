@@ -455,7 +455,193 @@ async def claim_resolve(update: Update, context: ContextTypes.DEFAULT_TYPE, clai
     )
 
 
-# ---------------------------------------------------------------- broadcast
+# ================================================================ refund processing
+
+@ui.require(perms.P_WALLET)
+async def refunds_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List pending refund requests."""
+    requests = db.list_refund_requests("pending", 20)
+    if not requests:
+        await ui.reply(update, "مفيش طلبات استرجاع معلقة.",
+                       reply_markup=ui.kb([[ui.hub_btn()]]))
+        return
+
+    lines = [f"💳 <b>طلبات الاسترجاع ({len(requests)})</b>\n"]
+    rows = []
+    for r in requests:
+        lines.append(
+            f"#{r['id']} · {r.get('username') or r['user_id']} · {ui.money(r['amount'])} · "
+            f"{r.get('binance_id') or r.get('usdt_address') or '—'}"
+        )
+        rows.append([ui.btn(
+            f"طلب #{r['id']} — {ui.money(r['amount'])} لـ {r.get('binance_id') or ''}",
+            f"adm:refund:{r['id']}",
+        )])
+    rows.append([ui.hub_btn()])
+    await ui.reply(update, "\n".join(lines), reply_markup=ui.kb(rows), parse_mode=ParseMode.HTML)
+
+
+@ui.require(perms.P_WALLET)
+async def refund_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, req_id: int):
+    """View a single refund request and approve/reject."""
+    query = update.callback_query
+    req = db.get_refund_request(req_id)
+    if not req:
+        await query.answer("الطلب ده مش موجود.")
+        return
+
+    status_map = {'pending': '⏳ معلق', 'approved': '✅ موافق', 'rejected': '❌ مرفوض'}
+    status_label = status_map.get(req['status'], req['status'])
+    text = (
+        f"💳 <b>طلب استرجاع #{req['id']}</b>\n"
+        f"👤 {req.get('username') or req['user_id']}\n"
+        f"💵 المبلغ: {ui.money(req['amount'])}\n"
+        f"🆔 Binance ID: <code>{req['binance_id']}</code>\n"
+        f"💬 السبب: {req.get('reason') or '—'}\n"
+        f"🕒 الطلب: {ui.fmt_dt(req['created_at'])}\n\n"
+        f"<b>الحالة: {status_label}</b>"
+    )
+    if req['status'] != 'pending':
+        if req.get('txid'):
+            text += f"\n🧾 Txid: <code>{req['txid']}</code>"
+        if req.get('admin_note'):
+            text += f"\n📝 ملاحظة: {req['admin_note']}"
+        rows = [[ui.btn("⬅️ الطلبات", "adm:refunds"), ui.hub_btn()]]
+    else:
+        rows = [
+            [ui.btn("✅ الموافقة والتحويل", f"adm:refundapp:{req_id}"),
+             ui.btn("❌ الرفض", f"adm:refundrec:{req_id}")],
+            [ui.btn("⬅️ الطلبات", "adm:refunds"), ui.hub_btn()],
+        ]
+    await query.edit_message_text(text, reply_markup=ui.kb(rows), parse_mode=ParseMode.HTML)
+
+
+REFUND_TXID, REFUND_NOTE = range(450, 452)
+
+
+@ui.require(perms.P_WALLET)
+async def refund_approve_start(update: Update, context: ContextTypes.DEFAULT_TYPE, req_id: int):
+    """Approve a refund and ask for the Binance txid."""
+    query = update.callback_query
+    await query.answer()
+    req = db.get_refund_request(req_id)
+    if not req or req['status'] != 'pending':
+        await query.edit_message_text("الطلب ده معالج بالفعل.")
+        return
+
+    context.user_data["refund_req_id"] = req_id
+    await query.edit_message_text(
+        f"✅ <b>الموافقة على الطلب #{req_id}</b>\n\n"
+        f"ابعت Binance Txid (رقم المعاملة) أو أي معرف فريد للتحويل.\n"
+        f"(لو ما عملتش التحويل لسه، كتب «pending» وهتحول بعدين)\n\n"
+        "/cancel للإلغاء",
+        parse_mode=ParseMode.HTML,
+    )
+    return REFUND_TXID
+
+
+async def refund_txid_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Save the transaction ID and close the approval."""
+    req_id = context.user_data.pop("refund_req_id", None)
+    if not req_id:
+        return ConversationHandler.END
+
+    txid = update.message.text.strip()
+    req = db.get_refund_request(req_id)
+    user_id = req["user_id"]
+    amount = req["amount"]
+
+    db.process_refund(req_id, "approved", txid=txid)
+    db.log_action(update.effective_user.id, "approve_refund", f"{req_id} {txid}")
+
+    await update.message.reply_text(
+        f"✅ اتسجل التحويل #{req_id}\n"
+        f"💵 {ui.money(amount)} لـ {req['binance_id']}\n"
+        f"Txid: {txid}",
+        reply_markup=ui.kb([[ui.hub_btn()]]),
+    )
+
+    try:
+        await context.bot.send_message(
+            user_id,
+            f"✅ اتوافقت على الطلب #{req_id}.\n"
+            f"💵 {ui.money(amount)} اتحولت لـ {req['binance_id']}.\n"
+            f"Txid: {txid}",
+        )
+    except:
+        pass
+    return ConversationHandler.END
+
+async def refund_reject_start(update: Update, context: ContextTypes.DEFAULT_TYPE, req_id: int):
+    """Reject a refund."""
+    query = update.callback_query
+    await query.answer()
+    req = db.get_refund_request(req_id)
+    if not req or req['status'] != 'pending':
+        await query.edit_message_text("الطلب ده معالج بالفعل.")
+        return
+
+    context.user_data["refund_req_id"] = req_id
+    await query.edit_message_text(
+        f"❌ <b>رفض الطلب #{req_id}</b>\n\n"
+        "سبب الرفض (اختياري):\n/cancel للإلغاء",
+    )
+    return REFUND_NOTE
+
+
+async def refund_note_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Save rejection note and restore balance if needed."""
+    req_id = context.user_data.pop("refund_req_id", None)
+    if not req_id:
+        return ConversationHandler.END
+
+    note = update.message.text.strip()
+    req = db.get_refund_request(req_id)
+    user_id = req["user_id"]
+    amount = req["amount"]
+
+    # لو رفضنا، نرجع الرصيد للعميل (في حالة ماكمّلش التحويل)
+    db.add_balance(user_id, amount, kind="refund_rejected", note=f"طلب #{req_id} اترفض",
+                   ref_type="refund", ref_id=req_id)
+    db.process_refund(req_id, "rejected", admin_note=note)
+    db.log_action(update.effective_user.id, "reject_refund", f"{req_id} {note[:40]}")
+
+    msg = f"❌ اترفض الطلب #{req_id} ورجع الرصيد {ui.money(amount)}"
+    await update.message.reply_text(msg, reply_markup=ui.kb([[ui.hub_btn()]]))
+
+    try:
+        await context.bot.send_message(
+            user_id,
+            f"❌ للأسف اترفض طلب الاسترجاع #{req_id}.\n"
+            f"💰 {ui.money(amount)} اترجع في رصيدك.\n"
+            f"💬 السبب: {note or '—'}",
+        )
+    except:
+        pass
+    return ConversationHandler.END
+
+
+async def refund_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("refund_req_id", None)
+    await update.message.reply_text("اتلغى.", reply_markup=ui.kb([[ui.hub_btn()]]))
+    return ConversationHandler.END
+
+
+refund_conv = ConversationHandler(
+    per_message=False,
+    entry_points=[CallbackQueryHandler(refund_approve_start, pattern=r"^adm:refundapp:\d+$")],
+    states={REFUND_TXID: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_txid_save)]},
+    fallbacks=[CommandHandler("cancel", refund_cancel)],
+)
+
+refund_reject_conv = ConversationHandler(
+    per_message=False,
+    entry_points=[CallbackQueryHandler(refund_reject_start, pattern=r"^adm:refundrec:\d+$")],
+    states={REFUND_NOTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_note_save)]},
+    fallbacks=[CommandHandler("cancel", refund_cancel)],
+)
+
+# ================================================================ broadcast
 
 BCAST_TEXT, BCAST_CONFIRM = range(410, 412)
 
@@ -855,194 +1041,6 @@ staff_conv = ConversationHandler(
 
 
 # ---------------------------------------------------------------- router
-
-
-
-# ================================================================ refund processing
-
-@ui.require(perms.P_WALLET)
-async def refunds_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List pending refund requests."""
-    requests = db.list_refund_requests("pending", 20)
-    if not requests:
-        await ui.reply(update, "مفيش طلبات استرجاع معلقة.",
-                       reply_markup=ui.kb([[ui.hub_btn()]]))
-        return
-
-    lines = [f"💳 <b>طلبات الاسترجاع ({len(requests)})</b>\n"]
-    rows = []
-    for r in requests:
-        lines.append(
-            f"#{r['id']} · {r.get('username') or r['user_id']} · {ui.money(r['amount'])} · "
-            f"{r.get('binance_id') or r.get('usdt_address') or '—'}"
-        )
-        rows.append([ui.btn(
-            f"طلب #{r['id']} — {ui.money(r['amount'])} لـ {r.get('binance_id') or ''}",
-            f"adm:refund:{r['id']}",
-        )])
-    rows.append([ui.hub_btn()])
-    await ui.reply(update, "\n".join(lines), reply_markup=ui.kb(rows), parse_mode=ParseMode.HTML)
-
-
-@ui.require(perms.P_WALLET)
-async def refund_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, req_id: int):
-    """View a single refund request and approve/reject."""
-    query = update.callback_query
-    req = db.get_refund_request(req_id)
-    if not req:
-        await query.answer("الطلب ده مش موجود.")
-        return
-
-    status_map = {'pending': '⏳ معلق', 'approved': '✅ موافق', 'rejected': '❌ مرفوض'}
-    status_label = status_map.get(req['status'], req['status'])
-    text = (
-        f"💳 <b>طلب استرجاع #{req['id']}</b>\n"
-        f"👤 {req.get('username') or req['user_id']}\n"
-        f"💵 المبلغ: {ui.money(req['amount'])}\n"
-        f"🆔 Binance ID: <code>{req['binance_id']}</code>\n"
-        f"💬 السبب: {req.get('reason') or '—'}\n"
-        f"🕒 الطلب: {ui.fmt_dt(req['created_at'])}\n\n"
-        f"<b>الحالة: {status_label}</b>"
-    )
-    if req['status'] != 'pending':
-        if req.get('txid'):
-            text += f"\n🧾 Txid: <code>{req['txid']}</code>"
-        if req.get('admin_note'):
-            text += f"\n📝 ملاحظة: {req['admin_note']}"
-        rows = [[ui.btn("⬅️ الطلبات", "adm:refunds"), ui.hub_btn()]]
-    else:
-        rows = [
-            [ui.btn("✅ الموافقة والتحويل", f"adm:refundapp:{req_id}"),
-             ui.btn("❌ الرفض", f"adm:refundrec:{req_id}")],
-            [ui.btn("⬅️ الطلبات", "adm:refunds"), ui.hub_btn()],
-        ]
-    await query.edit_message_text(text, reply_markup=ui.kb(rows), parse_mode=ParseMode.HTML)
-
-
-REFUND_TXID, REFUND_NOTE = range(450, 452)
-
-
-@ui.require(perms.P_WALLET)
-async def refund_approve_start(update: Update, context: ContextTypes.DEFAULT_TYPE, req_id: int):
-    """Approve a refund and ask for the Binance txid."""
-    query = update.callback_query
-    await query.answer()
-    req = db.get_refund_request(req_id)
-    if not req or req['status'] != 'pending':
-        await query.edit_message_text("الطلب ده معالج بالفعل.")
-        return
-
-    context.user_data["refund_req_id"] = req_id
-    await query.edit_message_text(
-        f"✅ <b>الموافقة على الطلب #{req_id}</b>\n\n"
-        f"ابعت Binance Txid (رقم المعاملة) أو أي معرف فريد للتحويل.\n"
-        f"(لو ما عملتش التحويل لسه، كتب «pending» وهتحول بعدين)\n\n"
-        "/cancel للإلغاء",
-        parse_mode=ParseMode.HTML,
-    )
-    return REFUND_TXID
-
-
-async def refund_txid_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Save the transaction ID and close the approval."""
-    req_id = context.user_data.pop("refund_req_id", None)
-    if not req_id:
-        return ConversationHandler.END
-
-    txid = update.message.text.strip()
-    req = db.get_refund_request(req_id)
-    user_id = req["user_id"]
-    amount = req["amount"]
-
-    db.process_refund(req_id, "approved", txid=txid)
-    db.log_action(update.effective_user.id, "approve_refund", f"{req_id} {txid}")
-
-    await update.message.reply_text(
-        f"✅ اتسجل التحويل #{req_id}\n"
-        f"💵 {ui.money(amount)} لـ {req['binance_id']}\n"
-        f"Txid: {txid}",
-        reply_markup=ui.kb([[ui.hub_btn()]]),
-    )
-
-    try:
-        await context.bot.send_message(
-            user_id,
-            f"✅ اتوافقت على الطلب #{req_id}.\n"
-            f"💵 {ui.money(amount)} اتحولت لـ {req['binance_id']}.\n"
-            f"Txid: {txid}",
-        )
-    except:
-        pass
-    return ConversationHandler.END
-
-async def refund_reject_start(update: Update, context: ContextTypes.DEFAULT_TYPE, req_id: int):
-    """Reject a refund."""
-    query = update.callback_query
-    await query.answer()
-    req = db.get_refund_request(req_id)
-    if not req or req['status'] != 'pending':
-        await query.edit_message_text("الطلب ده معالج بالفعل.")
-        return
-
-    context.user_data["refund_req_id"] = req_id
-    await query.edit_message_text(
-        f"❌ <b>رفض الطلب #{req_id}</b>\n\n"
-        "سبب الرفض (اختياري):\n/cancel للإلغاء",
-    )
-    return REFUND_NOTE
-
-
-async def refund_note_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Save rejection note and restore balance if needed."""
-    req_id = context.user_data.pop("refund_req_id", None)
-    if not req_id:
-        return ConversationHandler.END
-
-    note = update.message.text.strip()
-    req = db.get_refund_request(req_id)
-    user_id = req["user_id"]
-    amount = req["amount"]
-
-    # لو رفضنا، نرجع الرصيد للعميل (في حالة ماكمّلش التحويل)
-    db.add_balance(user_id, amount, kind="refund_rejected", note=f"طلب #{req_id} اترفض",
-                   ref_type="refund", ref_id=req_id)
-    db.process_refund(req_id, "rejected", admin_note=note)
-    db.log_action(update.effective_user.id, "reject_refund", f"{req_id} {note[:40]}")
-
-    msg = f"❌ اترفض الطلب #{req_id} ورجع الرصيد {ui.money(amount)}"
-    await update.message.reply_text(msg, reply_markup=ui.kb([[ui.hub_btn()]]))
-
-    try:
-        await context.bot.send_message(
-            user_id,
-            f"❌ للأسف اترفض طلب الاسترجاع #{req_id}.\n"
-            f"💰 {ui.money(amount)} اترجع في رصيدك.\n"
-            f"💬 السبب: {note or '—'}",
-        )
-    except:
-        pass
-    return ConversationHandler.END
-
-
-async def refund_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.pop("refund_req_id", None)
-    await update.message.reply_text("اتلغى.", reply_markup=ui.kb([[ui.hub_btn()]]))
-    return ConversationHandler.END
-
-
-refund_conv = ConversationHandler(
-    per_message=False,
-    entry_points=[CallbackQueryHandler(refund_approve_start, pattern=r"^adm:refundapp:\d+$")],
-    states={REFUND_TXID: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_txid_save)]},
-    fallbacks=[CommandHandler("cancel", refund_cancel)],
-)
-
-refund_reject_conv = ConversationHandler(
-    per_message=False,
-    entry_points=[CallbackQueryHandler(refund_reject_start, pattern=r"^adm:refundrec:\d+$")],
-    states={REFUND_NOTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_note_save)]},
-    fallbacks=[CommandHandler("cancel", refund_cancel)],
-)
 
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query

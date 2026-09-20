@@ -206,8 +206,9 @@ def admin_menu_keyboard(user_id):
          config.ADMIN_INVENTORY if can(perms.P_REPORTS) else None)
     pair(config.ADMIN_CREDIT if can(perms.P_WALLET) else None,
          config.ADMIN_WARRANTY if can(perms.P_WARRANTY) else None)
-    pair(config.ADMIN_BROADCAST if can(perms.P_BROADCAST) else None,
-         config.ADMIN_SETTINGS if can(perms.P_SETTINGS) else None)
+    pair("💳 طلبات الاسترجاع" if can(perms.P_WALLET) else None,
+         config.ADMIN_BROADCAST if can(perms.P_BROADCAST) else None)
+    pair(config.ADMIN_SETTINGS if can(perms.P_SETTINGS) else None)
     if perms.is_owner(user_id):
         rows.append([config.ADMIN_STAFF])
     rows.append([config.ADMIN_BACK])
