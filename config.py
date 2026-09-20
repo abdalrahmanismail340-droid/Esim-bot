@@ -54,7 +54,7 @@ MENU_SUPPORT = "🧑‍💻 الدعم الفني"
 MENU_HELP = "🔥 كيفية الاستخدام"
 MENU_ADMIN = "⚙️ لوحة التحكم"
 
-# ---------------- admin hub (inline buttons inside the panel) ----------------
+# ---------------- admin panel (bottom keyboard) ----------------
 ADMIN_CATALOG = "🗂️ الدول والباقات"
 ADMIN_TIERS = "🏷️ أسعار الجملة"
 ADMIN_STOCK = "📦 المخزون"
@@ -68,3 +68,5 @@ ADMIN_BROADCAST = "📢 رسالة جماعية"
 ADMIN_WARRANTY = "🛡️ طلبات الضمان"
 ADMIN_SETTINGS = "⚙️ الإعدادات"
 ADMIN_STAFF = "🔑 الأدمن والصلاحيات"
+ADMIN_BACK = "🔙 رجوع لقائمة المتجر"
+ADMIN_REFUNDS = "💳 استرجاع الرصيد"

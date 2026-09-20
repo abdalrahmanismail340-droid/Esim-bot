@@ -107,7 +107,7 @@ def main():
     app.add_handler(MessageHandler(menu(config.ADMIN_WARRANTY), adm.claims_panel))
     app.add_handler(MessageHandler(menu(config.ADMIN_SETTINGS), adm.settings_panel))
     app.add_handler(MessageHandler(menu(config.ADMIN_STAFF), adm.staff_panel))
-    app.add_handler(MessageHandler(menu(config.ADMIN_BACK), adm.back_to_shop))
+    if hasattr(config, 'ADMIN_BACK'): app.add_handler(MessageHandler(menu(config.ADMIN_BACK), adm.back_to_shop))
 
     # ---- callback routers ----
     app.add_handler(CallbackQueryHandler(noop, pattern=r"^noop$"))
