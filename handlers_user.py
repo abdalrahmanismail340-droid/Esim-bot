@@ -808,7 +808,6 @@ refund_conv = ConversationHandler(
     entry_points=[
         CommandHandler("refund", refund_start),
         CallbackQueryHandler(refund_start, pattern=r"^u:refund$"),
-        MessageHandler(filters.Regex(f"^{re.escape(config.MENU_BALANCE)}$"), refund_start),
     ],
     states={
         REFUND_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_amount)],

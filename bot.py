@@ -18,7 +18,10 @@ from telegram.ext import (
 import config
 import db
 import handlers_admin
+import handlers_catalog
+import handlers_reports
 import handlers_search
+import handlers_stock
 import handlers_user
 import permissions as perms
 import ui
@@ -114,13 +117,13 @@ async def text_message(update, context):
     # Admin keyboard buttons for various panels
     if perms.is_staff(user_id):
         patterns = [
-            (config.ADMIN_CATALOG, handlers_admin.catalog_panel),
-            (config.ADMIN_TIERS, handlers_admin.pricing_panel),
-            (config.ADMIN_STOCK, handlers_admin.stock_panel),
-            (config.ADMIN_SEARCH, handlers_search.search_start),
+            (config.ADMIN_CATALOG, handlers_catalog.panel),
+            (config.ADMIN_TIERS, handlers_catalog.tier_pick_product),
+            (config.ADMIN_STOCK, handlers_stock.panel),
+            (config.ADMIN_SEARCH, handlers_search.start),
             (config.ADMIN_CUSTOMERS, handlers_admin.customers),
-            (config.ADMIN_REPORTS, handlers_admin.reports_panel),
-            (config.ADMIN_INVENTORY, handlers_admin.inventory_panel),
+            (config.ADMIN_REPORTS, handlers_reports.panel),
+            (config.ADMIN_INVENTORY, handlers_reports.inventory_report),
             (config.ADMIN_CREDIT, handlers_admin.credit_start),
             (config.ADMIN_WARRANTY, handlers_admin.claims_panel),
             (config.ADMIN_BROADCAST, handlers_admin.broadcast_start),
@@ -155,6 +158,17 @@ def main():
     # Search
     app.add_handler(handlers_search.search_conv)
     app.add_handler(CallbackQueryHandler(handlers_search.callbacks, pattern=r"^srch:"))
+
+    # Catalogue, stock, and reports modules
+    app.add_handler(handlers_catalog.addcountry_conv)
+    app.add_handler(handlers_catalog.editcountry_conv)
+    app.add_handler(handlers_catalog.addplan_conv)
+    app.add_handler(handlers_catalog.editplan_conv)
+    app.add_handler(handlers_catalog.tier_conv)
+    app.add_handler(handlers_stock.addstock_conv)
+    app.add_handler(CallbackQueryHandler(handlers_catalog.callbacks, pattern=r"^cat:"))
+    app.add_handler(CallbackQueryHandler(handlers_stock.callbacks, pattern=r"^stk:"))
+    app.add_handler(CallbackQueryHandler(handlers_reports.callbacks, pattern=r"^rep:"))
 
     # User side: conversations
     app.add_handler(handlers_user.qty_conv)
