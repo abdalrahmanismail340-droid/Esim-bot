@@ -5,10 +5,12 @@ access guards and admin notifications.
 
 import functools
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.constants import ParseMode
+from telegram.ext import filters
 
 import config
 import db
@@ -183,8 +185,52 @@ def main_menu_keyboard(user_id=None):
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
+def admin_menu_keyboard(user_id):
+    """The admin panel as the bottom keyboard — always visible, no scrolling up
+    the chat to find it. Only shows what this admin is allowed to touch."""
+    rows = []
+
+    def pair(*labels):
+        labels = [x for x in labels if x]
+        for i in range(0, len(labels), 2):
+            rows.append(labels[i:i + 2])
+
+    can = lambda p: perms.can(user_id, p)
+    pair(config.ADMIN_CATALOG if can(perms.P_CATALOG) else None,
+         config.ADMIN_TIERS if can(perms.P_CATALOG) else None)
+    pair(config.ADMIN_STOCK if can(perms.P_STOCK) else None,
+         config.ADMIN_ADD_STOCK if can(perms.P_STOCK) else None)
+    pair(config.ADMIN_SEARCH if can(perms.P_SEARCH) else None,
+         config.ADMIN_CUSTOMERS if can(perms.P_USERS) else None)
+    pair(config.ADMIN_REPORTS if can(perms.P_REPORTS) else None,
+         config.ADMIN_INVENTORY if can(perms.P_REPORTS) else None)
+    pair(config.ADMIN_CREDIT if can(perms.P_WALLET) else None,
+         config.ADMIN_WARRANTY if can(perms.P_WARRANTY) else None)
+    pair(config.ADMIN_BROADCAST if can(perms.P_BROADCAST) else None,
+         config.ADMIN_SETTINGS if can(perms.P_SETTINGS) else None)
+    if perms.is_owner(user_id):
+        rows.append([config.ADMIN_STAFF])
+    rows.append([config.ADMIN_BACK])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+
+
+# A wizard step reads whatever you type next, so without this a keyboard key
+# pressed mid-wizard would be swallowed as the answer. Every conversation lists
+# it as a fallback, which cancels cleanly instead.
+# Build MENU_ESCAPE dynamically to match any menu button
+MENU_LABELS = [
+    config.MENU_BROWSE, config.MENU_TOPUP, config.MENU_MY_ESIMS, config.MENU_BALANCE,
+    config.MENU_SUPPORT, config.MENU_HELP, config.MENU_ADMIN,
+    config.ADMIN_CATALOG, config.ADMIN_TIERS, config.ADMIN_STOCK, config.ADMIN_ADD_STOCK,
+    config.ADMIN_SEARCH, config.ADMIN_CUSTOMERS, config.ADMIN_REPORTS, config.ADMIN_INVENTORY,
+    config.ADMIN_CREDIT, config.ADMIN_WARRANTY, config.ADMIN_BROADCAST, config.ADMIN_SETTINGS,
+    config.ADMIN_STAFF, config.ADMIN_BACK,
+]
+MENU_ESCAPE = filters.Regex("^(" + "|".join(re.escape(x) for x in MENU_LABELS) + ")$")
+
+
 def hub_btn():
-    """Every admin screen carries this so the panel is always one tap away."""
+    """Shortcut back to the panel summary from inside a screen."""
     return InlineKeyboardButton("⚙️ لوحة التحكم", callback_data="adm:home")
 
 

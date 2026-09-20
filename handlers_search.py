@@ -216,5 +216,6 @@ search_conv = ConversationHandler(
         CallbackQueryHandler(start, pattern=r"^srch:start$"),
     ],
     states={ASK_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, run)]},
-    fallbacks=[CommandHandler("cancel", cancel)],
+    fallbacks=[CommandHandler("cancel", cancel),
+               MessageHandler(ui.MENU_ESCAPE, cancel)],
 )

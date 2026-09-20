@@ -611,7 +611,8 @@ addcountry_conv = ConversationHandler(
         ASK_C_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, addcountry_name)],
         ASK_C_FLAG: [MessageHandler(filters.TEXT & ~filters.COMMAND, addcountry_flag)],
     },
-    fallbacks=[CommandHandler("cancel", cancel)],
+    fallbacks=[CommandHandler("cancel", cancel),
+               MessageHandler(ui.MENU_ESCAPE, cancel)],
 )
 
 editcountry_conv = ConversationHandler(
@@ -620,7 +621,8 @@ editcountry_conv = ConversationHandler(
         ASK_CE_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, cedit_name)],
         ASK_CE_FLAG: [MessageHandler(filters.TEXT & ~filters.COMMAND, cedit_flag)],
     },
-    fallbacks=[CommandHandler("cancel", cancel)],
+    fallbacks=[CommandHandler("cancel", cancel),
+               MessageHandler(ui.MENU_ESCAPE, cancel)],
 )
 
 addplan_conv = ConversationHandler(
@@ -633,13 +635,15 @@ addplan_conv = ConversationHandler(
         ASK_P_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, addplan_desc)],
         ASK_P_CONFIRM: [CallbackQueryHandler(addplan_confirm, pattern=r"^cat:plan(ok|cancel)$")],
     },
-    fallbacks=[CommandHandler("cancel", cancel)],
+    fallbacks=[CommandHandler("cancel", cancel),
+               MessageHandler(ui.MENU_ESCAPE, cancel)],
 )
 
 editplan_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(edit_field_start, pattern=r"^cat:edit:\d+:\w+$")],
     states={ASK_FIELD_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_field_save)]},
-    fallbacks=[CommandHandler("cancel", cancel)],
+    fallbacks=[CommandHandler("cancel", cancel),
+               MessageHandler(ui.MENU_ESCAPE, cancel)],
 )
 
 tier_conv = ConversationHandler(
@@ -648,5 +652,6 @@ tier_conv = ConversationHandler(
         ASK_TIER_QTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, tier_qty)],
         ASK_TIER_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tier_price)],
     },
-    fallbacks=[CommandHandler("cancel", cancel)],
+    fallbacks=[CommandHandler("cancel", cancel),
+               MessageHandler(ui.MENU_ESCAPE, cancel)],
 )

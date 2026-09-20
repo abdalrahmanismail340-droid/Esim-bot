@@ -9,6 +9,7 @@ and the profit reports actually useful.
 
 import io
 import logging
+import re
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -200,14 +201,14 @@ PICK_COUNTRY, PICK_PLAN, ASK_SUPPLIER, ASK_COST, ASK_DAYS, ASK_WARRANTY, ASK_COD
 @ui.require(P)
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Entry from '➕ إضافة ستوك' — pick a country first."""
-    query = update.callback_query
-    await query.answer()
+    if update.callback_query:
+        await update.callback_query.answer()
     countries = db.list_countries(active_only=False)
     if not countries:
-        await query.edit_message_text("ضيف دولة وباقة الأول من 🗂️ الدول والباقات.")
+        await ui.reply(update, "ضيف دولة وباقة الأول من 🗂️ الدول والباقات.")
         return ConversationHandler.END
     rows = [[ui.btn(f"{c['flag']} {c['name']}", f"stk:ac:{c['id']}")] for c in countries]
-    await query.edit_message_text("📦 إضافة ستوك\n\n1️⃣ اختار الدولة:", reply_markup=ui.kb(rows))
+    await ui.reply(update, "📦 إضافة ستوك\n\n1️⃣ اختار الدولة:", reply_markup=ui.kb(rows))
     return PICK_COUNTRY
 
 
@@ -427,6 +428,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 addstock_conv = ConversationHandler(
     entry_points=[
+        MessageHandler(filters.Regex(f"^{re.escape(config.ADMIN_ADD_STOCK)}$"), add_start),
         CallbackQueryHandler(add_start, pattern=r"^stk:addnew$"),
         CallbackQueryHandler(add_for_plan, pattern=r"^stk:add:\d+$"),
     ],
@@ -440,7 +442,8 @@ addstock_conv = ConversationHandler(
         ASK_CODES: [MessageHandler((filters.TEXT & ~filters.COMMAND) | filters.Document.ALL, add_codes)],
         ASK_CONFIRM: [CallbackQueryHandler(add_confirm, pattern=r"^stk:(save|cancel)$")],
     },
-    fallbacks=[CommandHandler("cancel", cancel)],
+    fallbacks=[CommandHandler("cancel", cancel),
+               MessageHandler(ui.MENU_ESCAPE, cancel)],
 )
 
 
