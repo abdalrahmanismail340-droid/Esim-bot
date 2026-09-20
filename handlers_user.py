@@ -727,9 +727,17 @@ async def refund_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def refund_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reason = update.message.text.strip() if update.message.text else None
 
-    user_id = context.user_data.pop("refund_uid")
-    amount = context.user_data.pop("refund_amount")
-    binance_id = context.user_data.pop("refund_binance_id")
+    # ✅ استخدم pop مع default value عشان مش الضروري الـ keys تكون موجودة
+    user_id = context.user_data.pop("refund_uid", None)
+    amount = context.user_data.pop("refund_amount", None)
+    binance_id = context.user_data.pop("refund_binance_id", None)
+
+    # ✅ تحقق من وجود الـ data قبل ما تكمل
+    if not user_id or amount is None or not binance_id:
+        await update.message.reply_text(
+            "❌ حصل خطأ في البيانات. ابدأ من الأول:\n/refund"
+        )
+        return ConversationHandler.END
 
     text = (
         f"📋 <b>مراجعة</b>\n\n"
@@ -739,6 +747,10 @@ async def refund_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"هل التفاصيل صحيحة؟"
     )
     context.user_data["refund_reason"] = reason
+    context.user_data["refund_uid"] = user_id  # ✅ احفظ الـ data تاني لـ refund_confirm
+    context.user_data["refund_amount"] = amount
+    context.user_data["refund_binance_id"] = binance_id
+    
     await update.message.reply_text(
         text,
         reply_markup=ui.kb([[ui.btn("✅ أرسل الطلب", "u:refundok"),
