@@ -1,6 +1,8 @@
 # 🔧 eSIM Bot Refund System — Fix Summary
 
-## ✅ الخطأ اللي اتصلح
+## ✅ المشاكل اللي اتصلحت
+
+### 1️⃣ Refund Detail Crash (handlers_admin.py)
 
 **المشكلة:**
 - عند الأدمن بيشوف تفاصيل طلب استرجاع، البوت كان بيكراش
@@ -10,11 +12,23 @@
   ```
 - لما `binance_id` يكون `None`، الـ formatting بيتكسر
 
+### 2️⃣ Bot.py Initialization Crash
+
+**المشكلة:**
+- البوت بيكراش عند الـ startup
+- سبب: `bot.py` كان بحاول استدعاء conversation handlers مش موجودة:
+  - `handlers_user.browse_conv` ❌ (ما موجود)
+  - `handlers_user.topup_conv` ❌ (ما موجود)
+  - `handlers_user.warranty_conv` ❌ (ما موجود)
+- الـ architecture الحقيقي استخدام MessageHandler + CallbackQueryHandler، مش ConversationHandler
+
 ---
 
-## 🔨 الحل المطبق
+## 🔨 الحلول المطبقة
 
-**Changed in `handlers_admin.py` (Lines 493-510):**
+### Fix #1: Refund Detail Null Safety (handlers_admin.py, Lines 493-510)
+
+**Changed in `handlers_admin.py`:**
 
 ```python
 # ❌ Before (كان بيكراش)
@@ -44,15 +58,40 @@ text = (
 
 ---
 
+### Fix #2: Bot.py Handler Registration (bot.py, Lines 130-155)
+
+**Changed in `bot.py`:**
+
+```python
+# ❌ Before (كان غلط — handlers مش موجودة)
+app.add_handler(handlers_user.browse_conv)      # ❌ CRASH
+app.add_handler(handlers_user.topup_conv)       # ❌ CRASH
+app.add_handler(handlers_user.warranty_conv)    # ❌ CRASH
+
+# ✅ After (الطريقة الصحيحة)
+app.add_handler(handlers_user.qty_conv)         # ✅ Exists
+app.add_handler(handlers_user.claim_conv)       # ✅ Exists
+app.add_handler(handlers_user.refund_conv)      # ✅ Exists (+ REFUND SYSTEM)
+
+# Top-up: direct MessageHandler (not ConversationHandler)
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers_user.topup_text))
+app.add_handler(MessageHandler(filters.PHOTO, handlers_user.topup_photo))
+
+# Callbacks
+app.add_handler(CallbackQueryHandler(handlers_user.callbacks, pattern=r"^u:"))
+```
+
+---
+
 ## 📋 الملفات المُحدثة
 
 | الملف | الحالة | التغييرات |
 |------|--------|----------|
-| `handlers_admin.py` | ✅ Fixed | `refund_detail()` — null-safe formatting |
+| `bot.py` | ✅ Fixed | Removed non-existent handlers; added correct ones (lines 130-155) |
+| `handlers_admin.py` | ✅ Fixed | `refund_detail()` — null-safe formatting (lines 493-510) |
 | `handlers_user.py` | ✅ Ready | No changes needed — already correct |
 | `ui.py` | ✅ Ready | Refund button exists at line 209 |
 | `db.py` | ✅ Ready | All refund functions present |
-| `bot.py` | ✅ Ready | Handlers registered (lines 136, 148-149) |
 
 ---
 

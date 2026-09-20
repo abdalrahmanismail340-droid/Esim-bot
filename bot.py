@@ -130,12 +130,17 @@ def main():
     app.add_handler(handlers_search.search_conv)
     app.add_handler(CallbackQueryHandler(handlers_search.callbacks, pattern=r"^srch:"))
 
-    # User side: customers
-    app.add_handler(handlers_user.browse_conv)
-    app.add_handler(handlers_user.topup_conv)
+    # User side: conversations
+    app.add_handler(handlers_user.qty_conv)
+    app.add_handler(handlers_user.claim_conv)
     app.add_handler(handlers_user.refund_conv)
-    app.add_handler(handlers_user.warranty_conv)
-    app.add_handler(CallbackQueryHandler(handlers_user.callbacks, pattern=r"^usr:"))
+    
+    # User side: top-up (text/photo handlers, not ConversationHandler)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers_user.topup_text))
+    app.add_handler(MessageHandler(filters.PHOTO, handlers_user.topup_photo))
+    
+    # User side: callbacks
+    app.add_handler(CallbackQueryHandler(handlers_user.callbacks, pattern=r"^u:"))
 
     # Admin: panels and actions
     app.add_handler(handlers_admin.credit_conv)
@@ -144,11 +149,11 @@ def main():
     app.add_handler(handlers_admin.note_conv)
     app.add_handler(handlers_admin.staff_conv)
     
-    # Admin: refunds
+    # Admin: refunds (✅ ALREADY WORKING)
     app.add_handler(handlers_admin.refund_conv)
     app.add_handler(handlers_admin.refund_reject_conv)
     
-    # Admin: warranty claims
+    # Admin: callbacks
     app.add_handler(CallbackQueryHandler(handlers_admin.callbacks, pattern=r"^adm:"))
 
     # Generic text message handler (catch menu buttons, fallback)

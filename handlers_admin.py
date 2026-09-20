@@ -492,11 +492,19 @@ async def refund_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, req_
 
     status_map = {'pending': '⏳ معلق', 'approved': '✅ موافق', 'rejected': '❌ مرفوض'}
     status_label = status_map.get(req['status'], req['status'])
+    
+    # Fix: Handle None values safely
+    binance_info = ""
+    if req.get('binance_id'):
+        binance_info = f"🆔 Binance ID: <code>{req['binance_id']}</code>\n"
+    elif req.get('usdt_address'):
+        binance_info = f"🪙 USDT Address: <code>{req['usdt_address']}</code>\n"
+    
     text = (
         f"💳 <b>طلب استرجاع #{req['id']}</b>\n"
         f"👤 {req.get('username') or req['user_id']}\n"
         f"💵 المبلغ: {ui.money(req['amount'])}\n"
-        f"🆔 Binance ID: <code>{req['binance_id']}</code>\n"
+        f"{binance_info}"
         f"💬 السبب: {req.get('reason') or '—'}\n"
         f"🕒 الطلب: {ui.fmt_dt(req['created_at'])}\n\n"
         f"<b>الحالة: {status_label}</b>"
