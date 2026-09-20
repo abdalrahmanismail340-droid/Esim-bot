@@ -21,7 +21,12 @@ SUPPORT_CONTACT = os.environ.get("SUPPORT_CONTACT", "@your_support_username")
 
 BINANCE_API_KEY = os.environ.get("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.environ.get("BINANCE_API_SECRET", "")
-AUTO_VERIFY = bool(BINANCE_API_KEY and BINANCE_API_SECRET)
+BINANCE_PAY_API_KEY = os.environ.get("BINANCE_PAY_API_KEY", "").strip()
+BINANCE_PAY_API_SECRET = os.environ.get("BINANCE_PAY_API_SECRET", "").strip()
+BINANCE_PAY_CERTIFICATE_SN = os.environ.get("BINANCE_PAY_CERTIFICATE_SN", "").strip()
+AUTO_VERIFY = bool(
+    BINANCE_PAY_API_KEY and BINANCE_PAY_API_SECRET and BINANCE_PAY_CERTIFICATE_SN
+)
 
 OCRSPACE_API_KEY = os.environ.get("OCRSPACE_API_KEY", "")
 

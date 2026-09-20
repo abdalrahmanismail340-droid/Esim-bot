@@ -1,57 +1,52 @@
-"""
-Binance API withdrawals and transfers.
-
-يركب على Binance API بتاعتك — محتاج BINANCE_API_KEY و BINANCE_API_SECRET 
-في .env, و إذن "Withdraw" في الـ API key settings.
-"""
+"""Binance transfer and Binance Pay Merchant API helpers."""
 
 import hashlib
 import hmac
+import json
 import os
+import secrets
 import time
+from typing import Any
 from urllib.parse import urlencode
 
 import requests
 
 
 class BinanceTransfer:
-    def __init__(s):
-        s.key = os.environ.get("BINANCE_API_KEY", "").strip()
-        s.secret = os.environ.get("BINANCE_API_SECRET", "").strip()
-        s.base = "https://api.binance.com"
+    """Legacy Binance Wallet transfer client used by refund operations."""
 
-    def _sign(s, data):
-        """HMAC-SHA256 signature."""
+    def __init__(self):
+        self.key = os.environ.get("BINANCE_API_KEY", "").strip()
+        self.secret = os.environ.get("BINANCE_API_SECRET", "").strip()
+        self.base = "https://api.binance.com"
+
+    def _sign(self, data):
         return hmac.new(
-            s.secret.encode(), urlencode(data).encode(), hashlib.sha256
+            self.secret.encode(), urlencode(data).encode(), hashlib.sha256
         ).hexdigest()
 
-    def _request(s, method, endpoint, data=None, **kw):
-        """Raw API call."""
-        if not s.key or not s.secret:
+    def _request(self, method, endpoint, data=None, **kwargs):
+        if not self.key or not self.secret:
             return {"error": "API keys not configured"}
-
-        url = s.base + endpoint
-        ts = int(time.time() * 1000)
-        params = {"timestamp": ts}
-
+        params = {"timestamp": int(time.time() * 1000)}
         if data:
             params.update(data)
-
-        params["signature"] = s._sign(params)
-        headers = {"X-MBX-APIKEY": s.key}
-
+        params["signature"] = self._sign(params)
         try:
-            resp = requests.request(
-                method, url, params=params, headers=headers, timeout=10, **kw
+            response = requests.request(
+                method,
+                self.base + endpoint,
+                params=params,
+                headers={"X-MBX-APIKEY": self.key},
+                timeout=10,
+                **kwargs,
             )
-            return resp.json()
-        except Exception as e:
-            return {"error": str(e)}
+            return response.json()
+        except Exception as exc:
+            return {"error": str(exc)}
 
-    def withdraw(s, coin, network, address, amount, **kw):
-        """Withdraw to an address."""
-        return s._request(
+    def withdraw(self, coin, network, address, amount, **kwargs):
+        return self._request(
             "POST",
             "/wapi/v3/withdraw.html",
             {
@@ -60,68 +55,112 @@ class BinanceTransfer:
                 "address": address,
                 "amount": amount,
                 "transactionFeeFlag": True,
-                "name": kw.get("name", ""),
+                "name": kwargs.get("name", ""),
             },
         )
 
-    def get_deposit_addr(s, coin, network=None):
-        """Fetch your own deposit address."""
-        return s._request(
-            "GET",
-            "/wapi/v3/depositAddress.html",
-            {"coin": coin, "network": network},
+    def get_deposit_addr(self, coin, network=None):
+        return self._request(
+            "GET", "/wapi/v3/depositAddress.html", {"coin": coin, "network": network}
         )
 
-    def query_order(s, txid):
-        """Check withdrawal status."""
-        return s._request("GET", "/wapi/v3/withdrawHistory.html", {"txid": txid})
+    def query_order(self, txid):
+        return self._request("GET", "/wapi/v3/withdrawHistory.html", {"txid": txid})
+
+
+# Binance Pay Merchant API
+BINANCE_PAY_BASE_URL = "https://bpay.binanceapi.com"
+BINANCE_PAY_QUERY_PATH = "/binancepay/openapi/v2/order/query"
+
+
+def _binance_pay_signature(timestamp: str, nonce: str, body: str, secret: str) -> str:
+    payload = f"{timestamp}\n{nonce}\n{body}\n"
+    return hmac.new(secret.encode(), payload.encode(), hashlib.sha512).hexdigest().upper()
+
+
+def query_binance_pay_order(
+    api_key: str, secret: str, certificate_sn: str, identifier: str
+) -> dict[str, Any]:
+    """Query a Binance Pay order by merchantTradeNo or prepayId."""
+    identifier = identifier.strip()
+    body = json.dumps(
+        {"merchantTradeNo": identifier}, separators=(",", ":"), ensure_ascii=False
+    )
+    timestamp = str(int(time.time() * 1000))
+    nonce = secrets.token_hex(16)
+    headers = {
+        "Content-Type": "application/json",
+        "BinancePay-Timestamp": timestamp,
+        "BinancePay-Nonce": nonce,
+        "BinancePay-Certificate-SN": certificate_sn,
+        "BinancePay-Signature": _binance_pay_signature(
+            timestamp, nonce, body, secret
+        ),
+    }
+    try:
+        response = requests.post(
+            BINANCE_PAY_BASE_URL + BINANCE_PAY_QUERY_PATH,
+            data=body.encode("utf-8"),
+            headers=headers,
+            timeout=15,
+        )
+        payload = response.json()
+    except Exception as exc:
+        return {"ok": False, "error": f"Binance Pay request failed: {exc}"}
+
+    if (
+        response.status_code != 200
+        or payload.get("status") != "SUCCESS"
+        or payload.get("code") != "000000"
+    ):
+        return {
+            "ok": False,
+            "error": payload.get("errorMessage")
+            or payload.get("code")
+            or f"HTTP {response.status_code}",
+            "raw": payload,
+        }
+
+    data = payload.get("data") or {}
+    return {
+        "ok": True,
+        "status": data.get("status"),
+        "amount": float(data.get("totalFee") or 0),
+        "currency": data.get("currency"),
+        "transaction_id": data.get("transactionId"),
+        "merchant_trade_no": data.get("merchantTradeNo"),
+        "prepay_id": data.get("prepayId"),
+    }
 
 
 async def execute_refund(refund_req_id, coin="USDT", network="TRX"):
-    """
-    Execute a refund from db record. Runs async in background.
-    Admin message completes immediately, withdrawal status comes later.
-    """
+    """Execute a refund from an approved database record."""
     import db
 
     req = db.get_refund_request(refund_req_id)
     if not req or req["status"] != "approved":
         return {"error": "request not approved"}
-
     address = req.get("usdt_address") or f"binance:{req['binance_id']}"
-    amount = req["amount"]
-
     client = BinanceTransfer()
     if not client.key or not client.secret:
         return {"error": "Binance API not configured"}
-
     result = client.withdraw(
         coin=coin,
         network=network,
         address=address,
-        amount=amount,
+        amount=req["amount"],
         name=f"refund-{refund_req_id}",
     )
-
-    if "error" in result:
-        return result
-
-    txid = result.get("id")
-    if txid:
-        db.process_refund(refund_req_id, "approved", txid=txid)
-        db.log_action(None, "auto_transfer", f"refund {refund_req_id} sent: {txid}")
-
+    if "error" not in result and result.get("id"):
+        db.process_refund(refund_req_id, "approved", txid=result["id"])
+        db.log_action(None, "auto_transfer", f"refund {refund_req_id} sent: {result['id']}")
     return result
 
 
 async def check_refund_status(refund_req_id):
-    """Check if a transfer completed."""
     import db
 
     req = db.get_refund_request(refund_req_id)
     if not req or not req.get("txid"):
         return None
-
-    client = BinanceTransfer()
-    status = client.query_order(req["txid"])
-    return status
+    return BinanceTransfer().query_order(req["txid"])

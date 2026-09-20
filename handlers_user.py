@@ -4,6 +4,7 @@ instant purchase from wallet balance, their own eSIMs with warranty state,
 and wallet top-up.
 """
 
+import asyncio
 import io
 import logging
 import re
@@ -24,6 +25,7 @@ from telegram.ext import (
 
 import config
 import db
+from binance_transfer import query_binance_pay_order
 import permissions as perms
 import ui
 from ocrspace_verify import extract_tx_ids_from_image
@@ -857,26 +859,36 @@ async def topup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data[AWAITING_TOPUP_TX] = True
     text = (
         f"💳 حوّل أي مبلغ USDT على:\n`{config.BINANCE_PAY_ID}`\n\n"
-        "بعد التحويل ابعت رقم/ID المعاملة هنا، أو ابعت سكرين شوت التحويل وهنقراه تلقائي.\n\n"
+        "بعد الدفع ابعت merchantTradeNo أو prepayId الخاص بطلب Binance Pay، "
+        "أو ابعت سكرين شوت التحويل للمراجعة اليدوية.\n\n"
         "المبلغ بيتضاف لرصيدك تلقائيًا بعد التحقق."
     )
     await ui.reply(update, text, parse_mode=ParseMode.MARKDOWN)
 
 
 async def _verify_and_credit(user_id: int, tx_id: str):
-    """Return credited/reused/not_found/unavailable without killing the update."""
-    try:
-        lookup = globals().get("get_transaction_by_id")
-        if lookup is None:
-            log.error("Automatic top-up verification is not implemented: get_transaction_by_id is missing")
-            return "unavailable", None
-        match = lookup(config.BINANCE_API_KEY, config.BINANCE_API_SECRET, tx_id)
-    except Exception:
-        log.exception("Automatic top-up verification failed for transaction %s", tx_id)
+    """Query Binance Pay and credit only a confirmed PAID USDT order."""
+    if not config.AUTO_VERIFY:
         return "unavailable", None
-    if not match:
+    try:
+        result = await asyncio.to_thread(
+            query_binance_pay_order,
+            config.BINANCE_PAY_API_KEY,
+            config.BINANCE_PAY_API_SECRET,
+            config.BINANCE_PAY_CERTIFICATE_SN,
+            tx_id,
+        )
+    except Exception:
+        log.exception("Binance Pay verification failed for order %s", tx_id)
+        return "unavailable", None
+    if not result.get("ok"):
+        log.warning("Binance Pay query failed for %s: %s", tx_id, result.get("error"))
         return "not_found", None
-    amount = abs(float(match.get("amount", 0)))
+    if result.get("status") != "PAID" or result.get("currency") != "USDT":
+        return "not_found", None
+    amount = abs(float(result.get("amount") or 0))
+    if amount <= 0:
+        return "not_found", None
     if not db.create_topup(user_id, tx_id, amount):
         return "reused", None
     return "credited", amount
