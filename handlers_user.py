@@ -864,8 +864,16 @@ async def topup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _verify_and_credit(user_id: int, tx_id: str):
-    """('credited', amount) / ('reused', None) / ('not_found', None)"""
-    match = get_transaction_by_id(config.BINANCE_API_KEY, config.BINANCE_API_SECRET, tx_id)
+    """Return credited/reused/not_found/unavailable without killing the update."""
+    try:
+        lookup = globals().get("get_transaction_by_id")
+        if lookup is None:
+            log.error("Automatic top-up verification is not implemented: get_transaction_by_id is missing")
+            return "unavailable", None
+        match = lookup(config.BINANCE_API_KEY, config.BINANCE_API_SECRET, tx_id)
+    except Exception:
+        log.exception("Automatic top-up verification failed for transaction %s", tx_id)
+        return "unavailable", None
     if not match:
         return "not_found", None
     amount = abs(float(match.get("amount", 0)))
@@ -906,6 +914,20 @@ async def _handle_candidates(update, context, candidates, from_image):
             return
         if status == "reused":
             await update.message.reply_text("⚠️ رقم المعاملة ده اتستخدم قبل كده.")
+            return
+        if status == "unavailable":
+            await update.message.reply_text(
+                "⚠️ التحقق الآلي من Binance غير مهيأ حاليًا. "
+                "تم إرسال رقم المعاملة للأدمن للمراجعة اليدوية."
+            )
+            await ui.notify_admins(
+                context,
+                f"⚠️ <b>تعذر التحقق الآلي من الشحن</b>\n"
+                f"👤 {ui.user_tag(user)}\n"
+                f"🧾 <code>{tx_id}</code>\n"
+                "راجع المعاملة يدويًا ثم اشحن الرصيد من لوحة الأدمن.",
+                perm=perms.P_WALLET,
+            )
             return
 
     await update.message.reply_text(
