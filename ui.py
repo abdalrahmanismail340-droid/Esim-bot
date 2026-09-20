@@ -217,16 +217,16 @@ def admin_menu_keyboard(user_id):
 # A wizard step reads whatever you type next, so without this a keyboard key
 # pressed mid-wizard would be swallowed as the answer. Every conversation lists
 # it as a fallback, which cancels cleanly instead.
-# Build MENU_ESCAPE dynamically to match any menu button
-MENU_LABELS = [
-    config.MENU_BROWSE, config.MENU_TOPUP, config.MENU_MY_ESIMS, config.MENU_BALANCE,
-    config.MENU_SUPPORT, config.MENU_HELP, config.MENU_ADMIN,
-    config.ADMIN_CATALOG, config.ADMIN_TIERS, config.ADMIN_STOCK, config.ADMIN_ADD_STOCK,
-    config.ADMIN_SEARCH, config.ADMIN_CUSTOMERS, config.ADMIN_REPORTS, config.ADMIN_INVENTORY,
-    config.ADMIN_CREDIT, config.ADMIN_WARRANTY, config.ADMIN_BROADCAST, config.ADMIN_SETTINGS,
-    config.ADMIN_STAFF, config.ADMIN_BACK,
-]
-MENU_ESCAPE = filters.Regex("^(" + "|".join(re.escape(x) for x in MENU_LABELS) + ")$")
+
+# Build MENU_ESCAPE for wizard fallbacks - only what's essential
+# to prevent menu keys from being swallowed as input
+MENU_ESCAPE = filters.Regex(
+    "^(" + "|".join(re.escape(x) for x in [
+        config.MENU_BROWSE, config.MENU_TOPUP, config.MENU_MY_ESIMS, 
+        config.MENU_BALANCE, config.MENU_SUPPORT, config.MENU_HELP, 
+        config.MENU_ADMIN,
+    ]) + ")$"
+)
 
 
 def hub_btn():
