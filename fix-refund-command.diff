@@ -1,0 +1,12 @@
+[1mdiff --git a/handlers_user.py b/handlers_user.py[m
+[1mindex 408384c..0340851 100644[m
+[1m--- a/handlers_user.py[m
+[1m+++ b/handlers_user.py[m
+[36m@@ -806,6 +806,7 @@[m [masync def refund_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):[m
+ refund_conv = ConversationHandler([m
+     per_message=False,[m
+     entry_points=[[m
+[32m+[m[32m        CommandHandler("refund", refund_start),[m
+         CallbackQueryHandler(refund_start, pattern=r"^u:refund$"),[m
+         MessageHandler(filters.Regex(f"^{re.escape(config.MENU_BALANCE)}$"), refund_start),[m
+     ],[m

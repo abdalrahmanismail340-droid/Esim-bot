@@ -806,6 +806,7 @@ async def refund_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 refund_conv = ConversationHandler(
     per_message=False,
     entry_points=[
+        CommandHandler("refund", refund_start),
         CallbackQueryHandler(refund_start, pattern=r"^u:refund$"),
         MessageHandler(filters.Regex(f"^{re.escape(config.MENU_BALANCE)}$"), refund_start),
     ],
