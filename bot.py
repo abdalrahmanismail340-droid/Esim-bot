@@ -80,6 +80,24 @@ async def text_message(update, context):
         await handlers_user.topup_text(update, context)
         return
 
+    # Customer reply-keyboard buttons are ordinary text messages, not
+    # callback queries, so route them explicitly here.
+    user_routes = {
+        config.MENU_BROWSE: handlers_user.browse,
+        config.MENU_TOPUP: handlers_user.topup,
+        config.MENU_MY_ESIMS: handlers_user.my_esims,
+        config.MENU_BALANCE: handlers_user.wallet,
+        config.MENU_SUPPORT: handlers_user.support,
+        config.MENU_HELP: handlers_user.help_cmd,
+    }
+    if text in user_routes:
+        await user_routes[text](update, context)
+        return
+
+    if text == config.MENU_ADMIN:
+        await handlers_admin.panel(update, context)
+        return
+
     # Refunds button from admin keyboard
     if text == "💳 طلبات الاسترجاع":
         if perms.is_staff(user_id) and perms.can(user_id, perms.P_WALLET):
