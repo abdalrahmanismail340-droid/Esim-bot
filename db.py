@@ -316,6 +316,22 @@ def init_db():
         )""")
 
         conn.execute("""
+        CREATE TABLE IF NOT EXISTS refund_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            status TEXT DEFAULT 'pending',
+            binance_id TEXT,
+            usdt_address TEXT,
+            txid TEXT,
+            reason TEXT,
+            admin_note TEXT,
+            created_at TEXT,
+            processed_at TEXT
+        )""")
+        _try(conn, "CREATE INDEX IF NOT EXISTS idx_refund_user ON refund_requests(user_id)")
+
+        conn.execute("""
         CREATE TABLE IF NOT EXISTS warranty_claims (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             order_id INTEGER NOT NULL,
@@ -1164,6 +1180,44 @@ def tx_id_already_used(tx_id):
 
 
 # ---------------------------------------------------------------- warranty
+
+# ================================================================ refunds
+
+def create_refund_request(user_id, amount, binance_id=None, usdt_address=None, reason=None):
+    """User asks to withdraw their balance to Binance."""
+    if amount <= 0:
+        return None
+    with get_conn() as conn:
+        return conn.insert(
+            "INSERT INTO refund_requests (user_id, amount, binance_id, usdt_address, reason, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, amount, binance_id, usdt_address, reason or "", utcnow()),
+        )
+
+
+def get_refund_request(req_id):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM refund_requests WHERE id = ?", (req_id,)).fetchone()
+
+
+def list_refund_requests(status="pending", limit=50):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT r.*, u.username FROM refund_requests r "
+            "LEFT JOIN users u ON u.telegram_id = r.user_id "
+            "WHERE r.status = ? ORDER BY r.created_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+
+
+def process_refund(req_id, status, txid=None, admin_note=None):
+    """Mark as approved/rejected, store the Binance txid if successful."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE refund_requests SET status = ?, txid = ?, admin_note = ?, processed_at = ? WHERE id = ?",
+            (status, txid, admin_note, utcnow(), req_id),
+        )
+
 
 def create_claim(order_id, user_id, reason):
     with get_conn() as conn:

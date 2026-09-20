@@ -6,6 +6,7 @@ and wallet top-up.
 
 import io
 import logging
+import re
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -299,7 +300,8 @@ async def qty_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 qty_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(qty_start, pattern=r"^u:qty:\d+$")],
     states={ASK_QTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, qty_save)]},
-    fallbacks=[CommandHandler("cancel", qty_cancel)],
+    fallbacks=[CommandHandler("cancel", qty_cancel),
+               MessageHandler(ui.MENU_ESCAPE, qty_cancel)],
 )
 
 
@@ -651,10 +653,163 @@ async def claim_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+
+# ================================================================ refund request
+
+REFUND_AMOUNT, REFUND_ID_OR_ADDR, REFUND_REASON, REFUND_CONFIRM = range(920, 924)
+
+
+async def refund_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await ui.guard(update):
+        return
+    user_id = update.effective_user.id
+    balance = db.get_balance(user_id)
+    if balance <= 0:
+        await ui.reply(update, "رصيدك صفر، مفيش حاجة لاسترجاعها 😊")
+        return ConversationHandler.END
+
+    context.user_data["refund_uid"] = user_id
+    text = (
+        f"💳 <b>طلب استرجاع رصيد</b>\n\n"
+        f"رصيدك الحالي: <b>{ui.money(balance)}</b>\n\n"
+        "كام مبلغ بدك تسترجع؟\n"
+        "(رقم، أو اكتب «كل» لاسترجاع الكل)\n\n"
+        "/cancel للإلغاء"
+    )
+    await ui.reply(update, text, parse_mode=ParseMode.HTML)
+    return REFUND_AMOUNT
+
+
+async def refund_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = context.user_data.get("refund_uid")
+    balance = db.get_balance(user_id)
+    text = update.message.text.strip()
+
+    if text.lower() in ("كل", "all"):
+        amount = balance
+    else:
+        try:
+            amount = float(text.replace(",", "."))
+        except ValueError:
+            await update.message.reply_text("لازم رقم. جرب تاني:")
+            return REFUND_AMOUNT
+
+    if amount <= 0 or amount > balance:
+        await update.message.reply_text(f"المبلغ لازم يكون من 0.01 لحد {ui.money(balance)}. جرب تاني:")
+        return REFUND_AMOUNT
+
+    context.user_data["refund_amount"] = amount
+    await update.message.reply_text(
+        f"2️⃣ <b>Binance ID</b> أو <b>USDT Address</b>\n"
+        f"(يوزرنيمك في بينانس أو محفظة USDT بتاعتك)\n\n"
+        f"المبلغ {ui.money(amount)} هيتحول للعنوان ده.\n\n"
+        "/cancel للإلغاء",
+        parse_mode=ParseMode.HTML,
+    )
+    return REFUND_ID_OR_ADDR
+
+
+async def refund_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    binance_id = update.message.text.strip()
+    if not binance_id or len(binance_id) < 3:
+        await update.message.reply_text("لازم تكون عنوان صحيح. جرب تاني:")
+        return REFUND_ID_OR_ADDR
+
+    context.user_data["refund_binance_id"] = binance_id
+    await update.message.reply_text(
+        f"3️⃣ ليه بدك تسترجع الفلوس؟\n"
+        "(تفصيل سريع، اختياري)\n\n"
+        "/cancel للإلغاء أو ابعت الرسالة للمتابعة",
+    )
+    return REFUND_REASON
+
+
+async def refund_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reason = update.message.text.strip() if update.message.text else None
+
+    user_id = context.user_data.pop("refund_uid")
+    amount = context.user_data.pop("refund_amount")
+    binance_id = context.user_data.pop("refund_binance_id")
+
+    text = (
+        f"📋 <b>مراجعة</b>\n\n"
+        f"💳 المبلغ: {ui.money(amount)}\n"
+        f"🆔 Binance ID: <code>{binance_id}</code>\n"
+        f"💬 السبب: {reason or '—'}\n\n"
+        f"هل التفاصيل صحيحة؟"
+    )
+    context.user_data["refund_reason"] = reason
+    await update.message.reply_text(
+        text,
+        reply_markup=ui.kb([[ui.btn("✅ أرسل الطلب", "u:refundok"),
+                             ui.btn("❌ إلغاء", "u:refundno")]]),
+        parse_mode=ParseMode.HTML,
+    )
+    return REFUND_CONFIRM
+
+
+async def refund_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "u:refundno":
+        for k in ("refund_uid", "refund_amount", "refund_binance_id", "refund_reason"):
+            context.user_data.pop(k, None)
+        await query.edit_message_text("اتلغى.")
+        return ConversationHandler.END
+
+    user_id = query.from_user.id
+    amount = context.user_data.pop("refund_amount", 0)
+    binance_id = context.user_data.pop("refund_binance_id", "")
+    reason = context.user_data.pop("refund_reason", "")
+
+    req_id = db.create_refund_request(user_id, amount, binance_id=binance_id, reason=reason)
+    if not req_id:
+        await query.edit_message_text("حصل خطأ. حاول تاني.")
+        return ConversationHandler.END
+
+    await query.edit_message_text(
+        f"✅ اتسجل طلب الاسترجاع #{req_id}.\n"
+        f"الأدمن هيراجعه ويحول الفلوس في أقرب وقت 🙏"
+    )
+    await ui.notify_admins(
+        context,
+        f"💳 <b>طلب استرجاع رصيد جديد #{req_id}</b>\n"
+        f"👤 {ui.user_tag(query.from_user)}\n"
+        f"💵 المبلغ: {ui.money(amount)}\n"
+        f"🆔 Binance ID: <code>{binance_id}</code>\n"
+        f"💬 السبب: {reason or '—'}",
+        perm=perms.P_WALLET,
+    )
+    return ConversationHandler.END
+
+
+async def refund_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    for k in ("refund_uid", "refund_amount", "refund_binance_id", "refund_reason"):
+        context.user_data.pop(k, None)
+    await update.message.reply_text("اتلغى.")
+    return ConversationHandler.END
+
+
+refund_conv = ConversationHandler(
+    entry_points=[
+        CallbackQueryHandler(refund_start, pattern=r"^u:refund$"),
+        MessageHandler(filters.Regex(f"^{re.escape(config.MENU_BALANCE)}$"), refund_start),
+    ],
+    states={
+        REFUND_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_amount)],
+        REFUND_ID_OR_ADDR: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_id)],
+        REFUND_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_reason)],
+        REFUND_CONFIRM: [CallbackQueryHandler(refund_confirm, pattern=r"^u:refund(ok|no)$")],
+    },
+    fallbacks=[CommandHandler("cancel", refund_cancel)],
+)
+
 claim_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(claim_start, pattern=r"^u:wc:\d+$")],
     states={CLAIM_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, claim_save)]},
-    fallbacks=[CommandHandler("cancel", claim_cancel)],
+    fallbacks=[CommandHandler("cancel", claim_cancel),
+               MessageHandler(ui.MENU_ESCAPE, claim_cancel)],
 )
 
 
@@ -675,8 +830,10 @@ async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"• {ui.LEDGER_AR.get(h['kind'], h['kind'])} {sign}{ui.money(h['amount'])} — "
                 f"{ui.fmt_dt(h['created_at'])}"
             )
-    await ui.reply(update, "\n".join(lines),
-                   reply_markup=ui.kb([[ui.btn("💳 شحن رصيد", "u:topup")]]),
+    rows = [[ui.btn("💳 شحن رصيد", "u:topup")]]
+    if balance > 0:
+        rows.append([ui.btn("💸 استرجاع رصيد", "u:refund")])
+    await ui.reply(update, "\n".join(lines), reply_markup=ui.kb(rows),
                    parse_mode=ParseMode.HTML)
 
 

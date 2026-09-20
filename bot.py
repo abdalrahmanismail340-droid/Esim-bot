@@ -1,8 +1,8 @@
 """
 Entry point. Wires every module together and starts polling.
 
-The admin side is one inline panel (/admin → adm:home). The bottom keyboard
-only carries the customer menu plus a single key that opens that panel.
+/admin swaps the bottom keyboard to the admin panel, so every section is one
+tap away at the bottom of the chat. '🔙 رجوع لقائمة المتجر' swaps it back.
 
 Handler order matters: conversations are registered first so their entry points
 win over the generic callback routers, and the free-text catch-all is last.
@@ -76,9 +76,12 @@ def main():
     app.add_handler(adm.broadcast_conv)
     app.add_handler(adm.maint_conv)
     app.add_handler(adm.note_conv)
+    app.add_handler(adm.refund_conv)
+    app.add_handler(adm.refund_reject_conv)
     app.add_handler(adm.staff_conv)
     app.add_handler(usr.claim_conv)
     app.add_handler(usr.qty_conv)
+    app.add_handler(usr.refund_conv)
 
     # ---- commands ----
     app.add_handler(CommandHandler("start", usr.start))
@@ -92,7 +95,19 @@ def main():
     app.add_handler(MessageHandler(menu(config.MENU_BALANCE), usr.wallet))
     app.add_handler(MessageHandler(menu(config.MENU_SUPPORT), usr.support))
     app.add_handler(MessageHandler(menu(config.MENU_HELP), usr.help_cmd))
-    app.add_handler(MessageHandler(menu(config.MENU_ADMIN), adm.open_panel_button))
+    app.add_handler(MessageHandler(menu(config.MENU_ADMIN), adm.panel))
+
+    # ---- admin panel keys (the bottom keyboard after /admin) ----
+    app.add_handler(MessageHandler(menu(config.ADMIN_CATALOG), cat.panel))
+    app.add_handler(MessageHandler(menu(config.ADMIN_TIERS), cat.tier_pick_product))
+    app.add_handler(MessageHandler(menu(config.ADMIN_STOCK), stk.panel))
+    app.add_handler(MessageHandler(menu(config.ADMIN_CUSTOMERS), adm.customers))
+    app.add_handler(MessageHandler(menu(config.ADMIN_REPORTS), rep.panel))
+    app.add_handler(MessageHandler(menu(config.ADMIN_INVENTORY), rep.inventory_report))
+    app.add_handler(MessageHandler(menu(config.ADMIN_WARRANTY), adm.claims_panel))
+    app.add_handler(MessageHandler(menu(config.ADMIN_SETTINGS), adm.settings_panel))
+    app.add_handler(MessageHandler(menu(config.ADMIN_STAFF), adm.staff_panel))
+    app.add_handler(MessageHandler(menu(config.ADMIN_BACK), adm.back_to_shop))
 
     # ---- callback routers ----
     app.add_handler(CallbackQueryHandler(noop, pattern=r"^noop$"))
