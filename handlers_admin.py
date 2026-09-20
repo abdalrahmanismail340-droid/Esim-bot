@@ -13,8 +13,6 @@ import io
 import logging
 import re
 
-import binance_transfer
-
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.error import Forbidden
@@ -951,38 +949,22 @@ async def refund_txid_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = req["user_id"]
     amount = req["amount"]
 
-    if txid.lower() == "auto":
-        # Try automatic transfer via Binance API
-        result = await binance_transfer.execute_refund(
-            req_id, coin="USDT", network="TRX"
-        )
-        if "error" in result:
-            await update.message.reply_text(
-                f"❌ فشل التحويل التلقائي: {result['error']}\n"
-                f"ابعت Binance Txid يدويًا:",
-            )
-            return REFUND_TXID
-        txid = result.get("id", "pending")
-    else:
-        db.process_refund(req_id, "approved", txid=txid)
+    db.process_refund(req_id, "approved", txid=txid)
+    db.log_action(update.effective_user.id, "approve_refund", f"{req_id} {txid}")
 
-    db.log_action(update.effective_user.id, "approve_refund", f"{req_id} txid {txid}")
-
-    msg = (
-        f"✅ اتحول {ui.money(amount)} لـ {req['binance_id']}\n"
-        f"🧾 Txid: <code>{txid}</code>"
+    await update.message.reply_text(
+        f"✅ اتسجل التحويل #{req_id}\n"
+        f"💵 {ui.money(amount)} لـ {req['binance_id']}\n"
+        f"Txid: {txid}",
+        reply_markup=ui.kb([[ui.hub_btn()]]),
     )
-    await update.message.reply_text(msg, reply_markup=ui.kb([[ui.hub_btn()]]),
-                                     parse_mode=ParseMode.HTML)
 
     try:
         await context.bot.send_message(
             user_id,
-            f"✅ اتوافقت على طلب الاسترجاع #{req_id}.\n"
+            f"✅ اتوافقت على الطلب #{req_id}.\n"
             f"💵 {ui.money(amount)} اتحولت لـ {req['binance_id']}.\n"
-            f"🧾 Txid: <code>{txid}</code>\n\n"
-            "ممكن تستغرق المعاملة شوية، متابعة معاك.",
-            parse_mode=ParseMode.MARKDOWN,
+            f"Txid: {txid}",
         )
     except:
         pass
