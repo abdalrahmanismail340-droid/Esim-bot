@@ -119,6 +119,7 @@ async def error_handler(update, context):
 
 def main():
     """Run the bot."""
+    db.init_db()
     app = Application.builder().token(config.BOT_TOKEN).build()
 
     # Command handlers

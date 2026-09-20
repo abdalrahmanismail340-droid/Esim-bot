@@ -1,0 +1,12 @@
+[1mdiff --git a/bot.py b/bot.py[m
+[1mindex 9b05430..474d1aa 100644[m
+[1m--- a/bot.py[m
+[1m+++ b/bot.py[m
+[36m@@ -119,6 +119,7 @@[m [masync def error_handler(update, context):[m
+ [m
+ def main():[m
+     """Run the bot."""[m
+[32m+[m[32m    db.init_db()[m
+     app = Application.builder().token(config.BOT_TOKEN).build()[m
+ [m
+     # Command handlers[m
