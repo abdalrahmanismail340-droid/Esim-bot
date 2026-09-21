@@ -606,29 +606,24 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------- conversations
 
 addcountry_conv = ConversationHandler(
-    per_message=False,
     entry_points=[CallbackQueryHandler(addcountry_start, pattern=r"^cat:addcountry$")],
     states={
         ASK_C_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, addcountry_name)],
         ASK_C_FLAG: [MessageHandler(filters.TEXT & ~filters.COMMAND, addcountry_flag)],
     },
-    fallbacks=[CommandHandler("cancel", cancel),
-               MessageHandler(ui.MENU_ESCAPE, cancel)],
+    fallbacks=[CommandHandler("cancel", cancel)],
 )
 
 editcountry_conv = ConversationHandler(
-    per_message=False,
     entry_points=[CallbackQueryHandler(cedit_start, pattern=r"^cat:cedit:\d+$")],
     states={
         ASK_CE_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, cedit_name)],
         ASK_CE_FLAG: [MessageHandler(filters.TEXT & ~filters.COMMAND, cedit_flag)],
     },
-    fallbacks=[CommandHandler("cancel", cancel),
-               MessageHandler(ui.MENU_ESCAPE, cancel)],
+    fallbacks=[CommandHandler("cancel", cancel)],
 )
 
 addplan_conv = ConversationHandler(
-    per_message=False,
     entry_points=[CallbackQueryHandler(addplan_start, pattern=r"^cat:addplan:\d+$")],
     states={
         ASK_P_DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, addplan_data)],
@@ -638,25 +633,20 @@ addplan_conv = ConversationHandler(
         ASK_P_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, addplan_desc)],
         ASK_P_CONFIRM: [CallbackQueryHandler(addplan_confirm, pattern=r"^cat:plan(ok|cancel)$")],
     },
-    fallbacks=[CommandHandler("cancel", cancel),
-               MessageHandler(ui.MENU_ESCAPE, cancel)],
+    fallbacks=[CommandHandler("cancel", cancel)],
 )
 
 editplan_conv = ConversationHandler(
-    per_message=False,
     entry_points=[CallbackQueryHandler(edit_field_start, pattern=r"^cat:edit:\d+:\w+$")],
     states={ASK_FIELD_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_field_save)]},
-    fallbacks=[CommandHandler("cancel", cancel),
-               MessageHandler(ui.MENU_ESCAPE, cancel)],
+    fallbacks=[CommandHandler("cancel", cancel)],
 )
 
 tier_conv = ConversationHandler(
-    per_message=False,
     entry_points=[CallbackQueryHandler(tier_add_start, pattern=r"^cat:tieradd:\d+$")],
     states={
         ASK_TIER_QTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, tier_qty)],
         ASK_TIER_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tier_price)],
     },
-    fallbacks=[CommandHandler("cancel", cancel),
-               MessageHandler(ui.MENU_ESCAPE, cancel)],
+    fallbacks=[CommandHandler("cancel", cancel)],
 )

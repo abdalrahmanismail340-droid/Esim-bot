@@ -4,10 +4,8 @@ instant purchase from wallet balance, their own eSIMs with warranty state,
 and wallet top-up.
 """
 
-import asyncio
 import io
 import logging
-import re
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -25,9 +23,9 @@ from telegram.ext import (
 
 import config
 import db
-from binance_transfer import query_binance_pay_order
 import permissions as perms
 import ui
+from binance_verify import get_transaction_by_id
 from ocrspace_verify import extract_tx_ids_from_image
 
 log = logging.getLogger(__name__)
@@ -299,11 +297,9 @@ async def qty_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 qty_conv = ConversationHandler(
-    per_message=False,
     entry_points=[CallbackQueryHandler(qty_start, pattern=r"^u:qty:\d+$")],
     states={ASK_QTY: [MessageHandler(filters.TEXT & ~filters.COMMAND, qty_save)]},
-    fallbacks=[CommandHandler("cancel", qty_cancel),
-               MessageHandler(ui.MENU_ESCAPE, qty_cancel)],
+    fallbacks=[CommandHandler("cancel", qty_cancel)],
 )
 
 
@@ -655,177 +651,10 @@ async def claim_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-
-# ================================================================ refund request
-
-REFUND_AMOUNT, REFUND_ID_OR_ADDR, REFUND_REASON, REFUND_CONFIRM = range(920, 924)
-
-
-async def refund_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await ui.guard(update):
-        return
-    user_id = update.effective_user.id
-    balance = db.get_balance(user_id)
-    if balance <= 0:
-        await ui.reply(update, "رصيدك صفر، مفيش حاجة لاسترجاعها 😊")
-        return ConversationHandler.END
-
-    context.user_data["refund_uid"] = user_id
-    text = (
-        f"💳 <b>طلب استرجاع رصيد</b>\n\n"
-        f"رصيدك الحالي: <b>{ui.money(balance)}</b>\n\n"
-        "كام مبلغ بدك تسترجع؟\n"
-        "(رقم، أو اكتب «كل» لاسترجاع الكل)\n\n"
-        "/cancel للإلغاء"
-    )
-    await ui.reply(update, text, parse_mode=ParseMode.HTML)
-    return REFUND_AMOUNT
-
-
-async def refund_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = context.user_data.get("refund_uid")
-    balance = db.get_balance(user_id)
-    text = update.message.text.strip()
-
-    if text.lower() in ("كل", "all"):
-        amount = balance
-    else:
-        try:
-            amount = float(text.replace(",", "."))
-        except ValueError:
-            await update.message.reply_text("لازم رقم. جرب تاني:")
-            return REFUND_AMOUNT
-
-    if amount <= 0 or amount > balance:
-        await update.message.reply_text(f"المبلغ لازم يكون من 0.01 لحد {ui.money(balance)}. جرب تاني:")
-        return REFUND_AMOUNT
-
-    context.user_data["refund_amount"] = amount
-    await update.message.reply_text(
-        f"2️⃣ <b>Binance ID</b> أو <b>USDT Address</b>\n"
-        f"(يوزرنيمك في بينانس أو محفظة USDT بتاعتك)\n\n"
-        f"المبلغ {ui.money(amount)} هيتحول للعنوان ده.\n\n"
-        "/cancel للإلغاء",
-        parse_mode=ParseMode.HTML,
-    )
-    return REFUND_ID_OR_ADDR
-
-
-async def refund_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    binance_id = update.message.text.strip()
-    if not binance_id or len(binance_id) < 3:
-        await update.message.reply_text("لازم تكون عنوان صحيح. جرب تاني:")
-        return REFUND_ID_OR_ADDR
-
-    context.user_data["refund_binance_id"] = binance_id
-    await update.message.reply_text(
-        f"3️⃣ ليه بدك تسترجع الفلوس؟\n"
-        "(تفصيل سريع، اختياري)\n\n"
-        "/cancel للإلغاء أو ابعت الرسالة للمتابعة",
-    )
-    return REFUND_REASON
-
-
-async def refund_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    reason = update.message.text.strip() if update.message.text else None
-
-    # ✅ استخدم pop مع default value عشان مش الضروري الـ keys تكون موجودة
-    user_id = context.user_data.pop("refund_uid", None)
-    amount = context.user_data.pop("refund_amount", None)
-    binance_id = context.user_data.pop("refund_binance_id", None)
-
-    # ✅ تحقق من وجود الـ data قبل ما تكمل
-    if not user_id or amount is None or not binance_id:
-        await update.message.reply_text(
-            "❌ حصل خطأ في البيانات. ابدأ من الأول:\n/refund"
-        )
-        return ConversationHandler.END
-
-    text = (
-        f"📋 <b>مراجعة</b>\n\n"
-        f"💳 المبلغ: {ui.money(amount)}\n"
-        f"🆔 Binance ID: <code>{binance_id}</code>\n"
-        f"💬 السبب: {reason or '—'}\n\n"
-        f"هل التفاصيل صحيحة؟"
-    )
-    context.user_data["refund_reason"] = reason
-    context.user_data["refund_uid"] = user_id  # ✅ احفظ الـ data تاني لـ refund_confirm
-    context.user_data["refund_amount"] = amount
-    context.user_data["refund_binance_id"] = binance_id
-    
-    await update.message.reply_text(
-        text,
-        reply_markup=ui.kb([[ui.btn("✅ أرسل الطلب", "u:refundok"),
-                             ui.btn("❌ إلغاء", "u:refundno")]]),
-        parse_mode=ParseMode.HTML,
-    )
-    return REFUND_CONFIRM
-
-
-async def refund_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == "u:refundno":
-        for k in ("refund_uid", "refund_amount", "refund_binance_id", "refund_reason"):
-            context.user_data.pop(k, None)
-        await query.edit_message_text("اتلغى.")
-        return ConversationHandler.END
-
-    user_id = query.from_user.id
-    amount = context.user_data.pop("refund_amount", 0)
-    binance_id = context.user_data.pop("refund_binance_id", "")
-    reason = context.user_data.pop("refund_reason", "")
-
-    req_id = db.create_refund_request(user_id, amount, binance_id=binance_id, reason=reason)
-    if not req_id:
-        await query.edit_message_text("حصل خطأ. حاول تاني.")
-        return ConversationHandler.END
-
-    await query.edit_message_text(
-        f"✅ اتسجل طلب الاسترجاع #{req_id}.\n"
-        f"الأدمن هيراجعه ويحول الفلوس في أقرب وقت 🙏"
-    )
-    await ui.notify_admins(
-        context,
-        f"💳 <b>طلب استرجاع رصيد جديد #{req_id}</b>\n"
-        f"👤 {ui.user_tag(query.from_user)}\n"
-        f"💵 المبلغ: {ui.money(amount)}\n"
-        f"🆔 Binance ID: <code>{binance_id}</code>\n"
-        f"💬 السبب: {reason or '—'}",
-        perm=perms.P_WALLET,
-    )
-    return ConversationHandler.END
-
-
-async def refund_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for k in ("refund_uid", "refund_amount", "refund_binance_id", "refund_reason"):
-        context.user_data.pop(k, None)
-    await update.message.reply_text("اتلغى.")
-    return ConversationHandler.END
-
-
-refund_conv = ConversationHandler(
-    per_message=False,
-    entry_points=[
-        CommandHandler("refund", refund_start),
-        CallbackQueryHandler(refund_start, pattern=r"^u:refund$"),
-    ],
-    states={
-        REFUND_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_amount)],
-        REFUND_ID_OR_ADDR: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_id)],
-        REFUND_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, refund_reason)],
-        REFUND_CONFIRM: [CallbackQueryHandler(refund_confirm, pattern=r"^u:refund(ok|no)$")],
-    },
-    fallbacks=[CommandHandler("cancel", refund_cancel)],
-)
-
 claim_conv = ConversationHandler(
-    per_message=False,
     entry_points=[CallbackQueryHandler(claim_start, pattern=r"^u:wc:\d+$")],
     states={CLAIM_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, claim_save)]},
-    fallbacks=[CommandHandler("cancel", claim_cancel),
-               MessageHandler(ui.MENU_ESCAPE, claim_cancel)],
+    fallbacks=[CommandHandler("cancel", claim_cancel)],
 )
 
 
@@ -846,10 +675,8 @@ async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"• {ui.LEDGER_AR.get(h['kind'], h['kind'])} {sign}{ui.money(h['amount'])} — "
                 f"{ui.fmt_dt(h['created_at'])}"
             )
-    rows = [[ui.btn("💳 شحن رصيد", "u:topup")]]
-    if balance > 0:
-        rows.append([ui.btn("💸 استرجاع رصيد", "u:refund")])
-    await ui.reply(update, "\n".join(lines), reply_markup=ui.kb(rows),
+    await ui.reply(update, "\n".join(lines),
+                   reply_markup=ui.kb([[ui.btn("💳 شحن رصيد", "u:topup")]]),
                    parse_mode=ParseMode.HTML)
 
 
@@ -859,36 +686,18 @@ async def topup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data[AWAITING_TOPUP_TX] = True
     text = (
         f"💳 حوّل أي مبلغ USDT على:\n`{config.BINANCE_PAY_ID}`\n\n"
-        "بعد الدفع ابعت merchantTradeNo أو prepayId الخاص بطلب Binance Pay، "
-        "أو ابعت سكرين شوت التحويل للمراجعة اليدوية.\n\n"
+        "بعد التحويل ابعت رقم/ID المعاملة هنا، أو ابعت سكرين شوت التحويل وهنقراه تلقائي.\n\n"
         "المبلغ بيتضاف لرصيدك تلقائيًا بعد التحقق."
     )
     await ui.reply(update, text, parse_mode=ParseMode.MARKDOWN)
 
 
 async def _verify_and_credit(user_id: int, tx_id: str):
-    """Query Binance Pay and credit only a confirmed PAID USDT order."""
-    if not config.AUTO_VERIFY:
-        return "unavailable", None
-    try:
-        result = await asyncio.to_thread(
-            query_binance_pay_order,
-            config.BINANCE_PAY_API_KEY,
-            config.BINANCE_PAY_API_SECRET,
-            config.BINANCE_PAY_CERTIFICATE_SN,
-            tx_id,
-        )
-    except Exception:
-        log.exception("Binance Pay verification failed for order %s", tx_id)
-        return "unavailable", None
-    if not result.get("ok"):
-        log.warning("Binance Pay query failed for %s: %s", tx_id, result.get("error"))
+    """('credited', amount) / ('reused', None) / ('not_found', None)"""
+    match = get_transaction_by_id(config.BINANCE_API_KEY, config.BINANCE_API_SECRET, tx_id)
+    if not match:
         return "not_found", None
-    if result.get("status") != "PAID" or result.get("currency") != "USDT":
-        return "not_found", None
-    amount = abs(float(result.get("amount") or 0))
-    if amount <= 0:
-        return "not_found", None
+    amount = abs(float(match.get("amount", 0)))
     if not db.create_topup(user_id, tx_id, amount):
         return "reused", None
     return "credited", amount
@@ -926,20 +735,6 @@ async def _handle_candidates(update, context, candidates, from_image):
             return
         if status == "reused":
             await update.message.reply_text("⚠️ رقم المعاملة ده اتستخدم قبل كده.")
-            return
-        if status == "unavailable":
-            await update.message.reply_text(
-                "⚠️ التحقق الآلي من Binance غير مهيأ حاليًا. "
-                "تم إرسال رقم المعاملة للأدمن للمراجعة اليدوية."
-            )
-            await ui.notify_admins(
-                context,
-                f"⚠️ <b>تعذر التحقق الآلي من الشحن</b>\n"
-                f"👤 {ui.user_tag(user)}\n"
-                f"🧾 <code>{tx_id}</code>\n"
-                "راجع المعاملة يدويًا ثم اشحن الرصيد من لوحة الأدمن.",
-                perm=perms.P_WALLET,
-            )
             return
 
     await update.message.reply_text(
