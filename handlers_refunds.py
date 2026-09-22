@@ -1,6 +1,7 @@
 """Customer refund requests and admin-approved Binance Pay payouts."""
 
 import asyncio
+import html
 import logging
 
 from telegram import Update
@@ -160,8 +161,15 @@ async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE, request_id
             pass
         await query.edit_message_text(f"✅ Binance قبل طلب التحويل.\nرقم الطلب: <code>{txid}</code>", parse_mode=ParseMode.HTML, reply_markup=ui.kb([[ui.btn("⬅️ الطلبات", "adm:refunds"), ui.hub_btn()]]))
     else:
-        db.fail_refund(request_id, str(result)[:500])
-        await query.edit_message_text("❌ فشل التحويل وتم إرجاع المبلغ لرصيد العميل.", reply_markup=ui.kb([[ui.btn("⬅️ الطلبات", "adm:refunds"), ui.hub_btn()]]))
+        error = str(result.get("error") or "رد غير معروف من Binance")[:700]
+        log.warning("Binance payout failed for refund %s: %s", request_id, error)
+        db.fail_refund(request_id, error)
+        await query.edit_message_text(
+            "❌ فشل التحويل وتم إرجاع المبلغ لرصيد العميل.\n"
+            f"سبب Binance: <code>{html.escape(error)}</code>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=ui.kb([[ui.btn("⬅️ الطلبات", "adm:refunds"), ui.hub_btn()]]),
+        )
 
 
 async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE, request_id: int):

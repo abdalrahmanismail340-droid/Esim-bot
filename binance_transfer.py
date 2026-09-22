@@ -108,7 +108,13 @@ class BinanceTransfer:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
         if response.status_code != 200 or payload.get("status") != "SUCCESS" or payload.get("code") != "000000":
-            return {"ok": False, "error": payload.get("errorMessage") or payload.get("code") or str(payload)}
+            return {
+                "ok": False,
+                "error": payload.get("errorMessage") or payload.get("code") or f"HTTP {response.status_code}",
+                "status_code": response.status_code,
+                "binance_status": payload.get("status"),
+                "binance_code": payload.get("code"),
+            }
         data = payload.get("data") or {}
         return {"ok": True, "requestId": data.get("requestId") or f"refund{request_id}", "status": data.get("status")}
 
