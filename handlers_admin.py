@@ -28,6 +28,7 @@ import config
 import db
 import handlers_search
 import handlers_user
+import handlers_refunds
 import permissions as perms
 import ui
 
@@ -65,6 +66,9 @@ def hub_keyboard(uid):
     claims_label = config.ADMIN_WARRANTY + (f" ({open_claims})" if open_claims else "")
     pair(
         ui.btn(config.ADMIN_CREDIT, "adm:creditstart") if perms.can(uid, perms.P_WALLET) else None,
+        ui.btn(config.ADMIN_REFUNDS, "adm:refunds") if perms.can(uid, perms.P_WALLET) else None,
+    )
+    pair(
         ui.btn(claims_label, "adm:claims:open") if perms.can(uid, perms.P_WARRANTY) else None,
     )
     pair(
@@ -907,6 +911,14 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await claim_resolve(update, context, int(parts[2]), "refund")
     elif action == "cdecline":
         await claim_resolve(update, context, int(parts[2]), "decline")
+    elif action == "refunds":
+        await handlers_refunds.admin_panel(update, context)
+    elif action == "refund":
+        await handlers_refunds.admin_detail(update, context, int(parts[2]))
+    elif action == "refundpay":
+        await handlers_refunds.approve(update, context, int(parts[2]))
+    elif action == "refundreject":
+        await handlers_refunds.reject(update, context, int(parts[2]))
     elif action == "settings":
         await settings_panel(update, context)
     elif action == "maint":

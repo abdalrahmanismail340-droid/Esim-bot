@@ -330,6 +330,23 @@ def init_db():
         )""")
 
         conn.execute("""
+        CREATE TABLE IF NOT EXISTS refund_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            address TEXT NOT NULL,
+            network TEXT NOT NULL,
+            reason TEXT DEFAULT '',
+            status TEXT DEFAULT 'pending',
+            txid TEXT,
+            admin_id INTEGER,
+            error TEXT DEFAULT '',
+            created_at TEXT,
+            updated_at TEXT
+        )""")
+        _try(conn, "CREATE INDEX IF NOT EXISTS idx_refunds_status ON refund_requests(status)")
+
+        conn.execute("""
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             admin_id INTEGER,
@@ -1330,3 +1347,94 @@ def orders_in_range(start, end, limit=2000):
             WHERE o.created_at >= ? AND o.created_at < ?
             ORDER BY o.id LIMIT ?
         """, (start, end, limit)).fetchall()
+
+
+# ---------------------------------------------------------------- refund requests
+
+def create_refund_request(user_id, amount, address, network, reason=""):
+    """Reserve balance and create one pending withdrawal request atomically."""
+    amount = round(float(amount), 8)
+    if amount <= 0:
+        return None
+    with get_conn() as conn:
+        row = conn.execute("SELECT balance FROM users WHERE telegram_id = ?", (user_id,)).fetchone()
+        if not row or float(row["balance"] or 0) < amount:
+            return None
+        conn.execute("UPDATE users SET balance = balance - ? WHERE telegram_id = ?", (amount, user_id))
+        _add_ledger(conn, user_id, "refund_hold", -amount, "refund", None,
+                    f"حجز استرجاع على {network}", None)
+        request_id = conn.insert(
+            "INSERT INTO refund_requests (user_id, amount, address, network, reason, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
+            (user_id, amount, address, network, reason or "", utcnow(), utcnow()),
+        )
+        return request_id
+
+
+def get_refund_request(request_id):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM refund_requests WHERE id = ?", (request_id,)).fetchone()
+
+
+def list_refund_requests(status="pending", limit=50):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM refund_requests WHERE status = ? ORDER BY id DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+
+
+def mark_refund_processing(request_id, admin_id):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE refund_requests SET status = 'processing', admin_id = ?, updated_at = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (admin_id, utcnow(), request_id),
+        )
+        row = conn.execute(
+            "SELECT status, admin_id FROM refund_requests WHERE id = ?", (request_id,)
+        ).fetchone()
+        return bool(row and row["status"] == "processing" and row["admin_id"] == admin_id)
+
+
+def complete_refund(request_id, txid):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE refund_requests SET status = 'submitted', txid = ?, updated_at = ? "
+            "WHERE id = ? AND status = 'processing'",
+            (txid, utcnow(), request_id),
+        )
+
+
+def fail_refund(request_id, error):
+    with get_conn() as conn:
+        req = conn.execute(
+            "SELECT * FROM refund_requests WHERE id = ? AND status = 'processing'", (request_id,)
+        ).fetchone()
+        if not req:
+            return None
+        conn.execute(
+            "UPDATE refund_requests SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
+            (error[:500], utcnow(), request_id),
+        )
+        conn.execute("UPDATE users SET balance = balance + ? WHERE telegram_id = ?", (req["amount"], req["user_id"]))
+        _add_ledger(conn, req["user_id"], "refund_release", req["amount"], "refund", request_id,
+                    "فشل التحويل وإرجاع الحجز", None)
+        return req
+
+
+def reject_refund(request_id, admin_id, reason="رفض الأدمن"):
+    with get_conn() as conn:
+        req = conn.execute(
+            "SELECT * FROM refund_requests WHERE id = ? AND status = 'pending'", (request_id,)
+        ).fetchone()
+        if not req:
+            return None
+        conn.execute(
+            "UPDATE refund_requests SET status = 'rejected', admin_id = ?, error = ?, updated_at = ? WHERE id = ?",
+            (admin_id, reason, utcnow(), request_id),
+        )
+        conn.execute("UPDATE users SET balance = balance + ? WHERE telegram_id = ?", (req["amount"], req["user_id"]))
+        _add_ledger(conn, req["user_id"], "refund_release", req["amount"], "refund", request_id,
+                    "رفض الطلب وإرجاع الحجز", admin_id)
+        return req

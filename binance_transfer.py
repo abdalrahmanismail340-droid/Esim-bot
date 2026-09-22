@@ -67,6 +67,51 @@ class BinanceTransfer:
     def query_order(self, txid):
         return self._request("GET", "/wapi/v3/withdrawHistory.html", {"txid": txid})
 
+    def payout_to_binance_id(self, receiver, amount, request_id):
+        """Send USDT to a Binance ID through Binance Pay batch payout."""
+        api_key = os.environ.get("BINANCE_PAY_API_KEY", "").strip()
+        secret = os.environ.get("BINANCE_PAY_API_SECRET", "").strip()
+        certificate = os.environ.get("BINANCE_PAY_CERTIFICATE_SN", "").strip()
+        if not api_key or not secret or not certificate:
+            return {"ok": False, "error": "Binance Pay payout credentials are not configured"}
+        body = json.dumps({
+            "requestId": f"refund{request_id}",
+            "batchName": f"refund-{request_id}",
+            "currency": "USDT",
+            "totalAmount": str(amount),
+            "totalNumber": 1,
+            "bizScene": "REIMBURSEMENT",
+            "transferDetailList": [{
+                "merchantSendId": f"refund{request_id}",
+                "transferAmount": str(amount),
+                "receiveType": "BINANCE_ID",
+                "transferMethod": "SPOT_WALLET",
+                "receiver": str(receiver),
+                "remark": f"refund-{request_id}",
+            }],
+        }, separators=(",", ":"))
+        timestamp = str(int(time.time() * 1000))
+        nonce = secrets.token_hex(16)
+        headers = {
+            "Content-Type": "application/json",
+            "BinancePay-Timestamp": timestamp,
+            "BinancePay-Nonce": nonce,
+            "BinancePay-Certificate-SN": certificate,
+            "BinancePay-Signature": _binance_pay_signature(timestamp, nonce, body, secret),
+        }
+        try:
+            response = requests.post(
+                BINANCE_PAY_BASE_URL + "/binancepay/openapi/payout/transfer",
+                data=body.encode("utf-8"), headers=headers, timeout=15,
+            )
+            payload = response.json()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        if response.status_code != 200 or payload.get("status") != "SUCCESS" or payload.get("code") != "000000":
+            return {"ok": False, "error": payload.get("errorMessage") or payload.get("code") or str(payload)}
+        data = payload.get("data") or {}
+        return {"ok": True, "requestId": data.get("requestId") or f"refund{request_id}", "status": data.get("status")}
+
 
 # Binance Pay Merchant API
 BINANCE_PAY_BASE_URL = "https://bpay.binanceapi.com"

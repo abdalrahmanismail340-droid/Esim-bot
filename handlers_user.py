@@ -676,7 +676,8 @@ async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"{ui.fmt_dt(h['created_at'])}"
             )
     await ui.reply(update, "\n".join(lines),
-                   reply_markup=ui.kb([[ui.btn("💳 شحن رصيد", "u:topup")]]),
+                   reply_markup=ui.kb([[ui.btn("💳 شحن رصيد", "u:topup"),
+                                       ui.btn("💸 استرجاع رصيد", "u:refund")]]),
                    parse_mode=ParseMode.HTML)
 
 

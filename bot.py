@@ -29,6 +29,7 @@ import handlers_reports as rep
 import handlers_search as srch
 import handlers_stock as stk
 import handlers_user as usr
+import handlers_refunds as refunds
 import ui
 
 logging.basicConfig(
@@ -79,6 +80,7 @@ def main():
     app.add_handler(adm.staff_conv)
     app.add_handler(usr.claim_conv)
     app.add_handler(usr.qty_conv)
+    app.add_handler(refunds.refund_conv)
 
     # ---- commands ----
     app.add_handler(CommandHandler("start", usr.start))
